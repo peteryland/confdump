@@ -21,6 +21,7 @@ description:         Please see the README on GitHub at <https://github.com/pete
 
 dependencies:
 - base >= 4.7 && < 5
+- utf8-string >= 1.0
 - mysql-haskell >= 0.8
 - io-streams >= 1.5
 - text >= 1.2

@@ -2,6 +2,8 @@
 
 module Main where
 
+import Password(confPass)
+
 import Data.Maybe(listToMaybe)
 import System.Environment(getArgs)
 import System.Exit(exitFailure)
@@ -28,7 +30,7 @@ createPage fs (Page title contents children) = do
 
 getData :: String -> IO ()
 getData spacekey = do
-  conn <- connect defaultConnectInfo {ciUser = "confluence", ciPassword = "", ciDatabase = "confluence"}
+  conn <- connect defaultConnectInfo {ciUser = "confluence", ciPassword = confPass, ciDatabase = "confluence"}
   space <- getSpace conn spacekey
   case space of
     Nothing -> do
