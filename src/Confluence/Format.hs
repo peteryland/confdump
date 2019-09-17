@@ -5,8 +5,9 @@ module Confluence.Format(confluenceToPandoc) where
 import Data.Char(isSpace)
 import Data.List(intercalate)
 import Data.Text(pack, unpack)
-import Data.XML.Types(Content(..))
-import Text.XML.Stream.Parse(decodeHtmlEntities)
+import Data.Text.Lazy(toStrict)
+import Data.Text.Lazy.Builder(toLazyText)
+import HTMLEntities.Decoder(htmlEncodedText)
 import Text.ParserCombinators.Parsec
 
 data Attr = Attr String String deriving Show
@@ -36,19 +37,18 @@ findLink l@('h':'t':'t':'p':'s':':':_) = l
 findLink l@('f':'t':'p':':':_) = l
 findLink l = '/':l
 
+findLink' :: String -> String -> String
+findLink' s l = "/" ++ s ++ "-" ++ l
+
 decode :: String -> String
-decode ('&':s) = (decodeEntity (takeWhile (/= ';') s)) ++ decode (tail' (dropWhile (/= ';') s))
-  where
-    decodeEntity s' = case decodeHtmlEntities $ pack s' of
-      ContentEntity t -> "&" ++ unpack t ++ ";"
-      ContentText   t -> unpack t
-    tail' [] = []
-    tail' (_:xs) = xs
-decode (s:ss) = s : decode ss
-decode "" = ""
+decode = unpack . toStrict . toLazyText . htmlEncodedText . pack
 
 show' :: [String] -> Elem -> String
 show' fs (Tag "p" [] es) = "\n" ++ show'' fs es ++ "\n"
+show' fs (Tag "p" [Attr "class" "auto-cursor-target"] es) = "\n" ++ show'' fs es ++ "\n"
+show' fs (Tag "p" [Attr "style" s] es) = "\n[" ++ show'' fs es ++ "]{style=\"" ++ s ++ "\"}\n"
+show' fs (Tag "span" [Attr "style" s] es) = "[" ++ show'' fs es ++ "]{style=\"" ++ s ++ "\"}"
+show' _  (Tag "hr" [] []) = "---\n"
 show' _  (Tag "br" [] []) = "\n"
 show' fs (Tag "div" [] es) = "\n:::\n" ++ show'' fs es ++ "\n:::\n"
 show' fs (Tag "h1" [] es) = "\n# " ++ show'' fs es ++ "\n"
@@ -57,22 +57,32 @@ show' fs (Tag "h3" [] es) = "\n### " ++ show'' fs es ++ "\n"
 show' fs (Tag "h4" [] es) = "\n#### " ++ show'' fs es ++ "\n"
 show' fs (Tag "h5" [] es) = "\n##### " ++ show'' fs es ++ "\n"
 show' fs (Tag "h6" [] es) = "\n###### " ++ show'' fs es ++ "\n"
-show' fs (Tag "a" (Attr "href" l:[]) es) = "[" ++ show'' fs es ++ "](" ++ findLink l ++ ")"
+show' fs (Tag "a" [Attr "href" l] es) = "[" ++ show'' fs es ++ "](" ++ findLink l ++ ")"
+show' fs (Tag "a" [Attr "class" "external-link", Attr "href" l, Attr "rel" "nofollow"] es) = "[" ++ show'' fs es ++ "](" ++ l ++ "){.external-link}" -- drop the rel="nofollow"
 show' _  (Tag "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []]) = "[" ++ l ++ "](" ++ findLink l ++ ")"
 show' fs (Tag "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] [], Tag "ac:plain-text-link-body" [] es]) = "[" ++ show'' fs es ++ "](" ++ findLink l ++ ")"
+show' fs (Tag "ac:link" [Attr "ac:anchor" la] [Tag "ri:page" [Attr "ri:content-title" l] [], Tag "ac:plain-text-link-body" [] es]) = "[" ++ show'' fs es ++ "](" ++ findLink l ++ "#" ++ la ++ ")"
+show' fs (Tag "ac:link" [Attr "ac:anchor" la] [Tag "ac:plain-text-link-body" [] es]) = "[" ++ show'' fs es ++ "](#" ++ la ++ ")"
+show' fs (Tag "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] es]) = "![" ++ show'' fs es ++ "](" ++ f ++ ")"
+show' fs (Tag "ac:image" [Attr "ac:height" val] [Tag "ri:attachment" [Attr "ri:filename" f] es]) = "![" ++ show'' fs es ++ "](" ++ f ++ "){height=" ++ val ++ "}"
+show' fs (Tag "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] es]) = "![" ++ show'' fs es ++ "](" ++ f ++ "){width=" ++ val ++ "}"
 show' fs (Tag "ac:inline-comment-marker" _ es) = show'' fs es
 show' fs (Tag "span" [] es) = show'' fs es
 show' fs (Tag "code" [] es) = "`" ++ show'' fs es ++ "`"
 show' fs (Tag "code" [Attr "style" "font-size: 21.546px;"] es) = "`" ++ show'' fs es ++ "`"
-show' fs (Tag "ac:structured-macro" (Attr "ac:name" "code":_) es) =  showCodeMacro fs False [] es
+show' fs (Tag "ac:structured-macro" (Attr "ac:name" "anchor":_) [Tag "ac:parameter" [Attr "ac:name" ""] name]) = "{#" ++ show'' fs name ++ "}"
+show' fs (Tag "ac:structured-macro" (Attr "ac:name" "code":_) es) = showCodeMacro fs False [] es
+show' fs (Tag "ac:structured-macro" (Attr "ac:name" "bestpractice":_) [Tag "ac:parameter" [Attr "ac:name" "atlassian-macro-output-type"] [Text "INLINE"], Tag "ac:rich-text-body" [] es]) = "::: {.bestpractice}\n" ++ show'' fs es ++ "\n:::\n" -- don't actually inline, just use a div
 show' fs (Tag "ac:structured-macro" (Attr "ac:name" "warning":_) [Tag "ac:rich-text-body" [] es]) = "::: {.warning}\n" ++ show'' fs es ++ "\n:::\n"
 show' fs (Tag "ac:structured-macro" (Attr "ac:name" "info":_) [Tag "ac:rich-text-body" [] es]) = "::: {.info}\n" ++ show'' fs es ++ "\n:::\n"
 show' fs (Tag "ac:structured-macro" (Attr "ac:name" "tip":_) [Tag "ac:rich-text-body" [] es]) = "::: {.tip}\n" ++ show'' fs es ++ "\n:::\n"
-show' _  (Tag "ac:structured-macro" (Attr "ac:name" "include":_) [Tag "ac:parameter" [Attr "ac:name" ""] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []]]]) = "#include \"" ++ findLink l ++ "\"\n"
+show' _  (Tag "ac:structured-macro" (Attr "ac:name" "include":_) [Tag "ac:parameter" [Attr "ac:name" ""] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:space-key" s, Attr "ri:content-title" l] []]]]) = "#include \"" ++ findLink' s l ++ "\""
+show' _  (Tag "ac:structured-macro" (Attr "ac:name" "include":_) [Tag "ac:parameter" [Attr "ac:name" ""] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []]]]) = "#include \"" ++ findLink l ++ "\""
 show' fs (Tag "em" [] es) = "*" ++ show'' fs es ++ "*"
 show' fs (Tag "strong" [] es) = "**" ++ show'' fs es ++ "**"
-show' fs (Tag "ul" [] es) = concatMap (showul fs) es
-show' fs (Tag "ol" [] es) = concatMap (showol fs) es
+show' fs (Tag "ul" _ es) = concatMap (showul fs) es
+show' fs (Tag "ol" _ es) = concatMap (showol fs) es
+show' fs (Tag "blockquote" [] es) = "\n" ++ indentWith "> " (unlines . dropWhile (=="") . lines $ show'' fs es) ++ "\n"
 show' fs (Tag t as es) = "<" ++ t ++ show as ++ ">\n" ++ show'' fs es ++ "\n</" ++ t ++ ">"
 show' _  (Text s) = decode s
 
@@ -94,6 +104,7 @@ showCodeMacro fs haveLang attrs es = showCodeMacro fs haveLang attrs [Tag "ac:pl
 
 showul :: [String] -> Elem -> String
 showul fs (Tag "li" [] es) = "* " ++ indent' (show'' fs es) ++ "\n"
+showul fs (Tag "li" [Attr "style" "list-style-type: disc;"] es) = "* " ++ indent' (show'' fs es) ++ "\n"
 showul fs e = indent $ show' fs e
 
 showol :: [String] -> Elem -> String
