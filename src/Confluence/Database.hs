@@ -42,6 +42,10 @@ getThree :: [a] -> Maybe (a, a, a)
 getThree (x:y:z:_) = Just (x, y, z)
 getThree _ = Nothing
 
+-- getFour :: [a] -> Maybe (a, a, a, a)
+-- getFour (w:x:y:z:_) = Just (w, x, y, z)
+-- getFour _ = Nothing
+
 maybeToString :: Maybe String -> String
 maybeToString (Just s) = s
 maybeToString Nothing = ""
@@ -68,6 +72,14 @@ getPage conn pageId = do
   children'' <- mapM (getPage conn . fst) $ sortOn (unwrapMySQLInt . snd) $ mapMaybe getTwo children'
 
   return $ Page title bodycontent children''
+
+  -- Attachments:
+  -- s3 <- prepareStmt conn "SELECT CONTENTID, TITLE, SPACEID, HIBERNATEVERSION FROM CONTENT WHERE CONTENTTYPE='ATTACHMENT' AND CONTENTSTATUS='current' AND PREVVER=NULL AND PAGEID=?"
+  -- (_, attachments) <- queryStmt conn s3 [pageId]
+  -- attachments' <- getFour <$> S.toList attachments
+  -- -- filename on filesystem is "/var/lib/confluence/attachments/ver003/" ++ show (spaceId `mod` 250) ++ "/" ++ show (spaceId `div` 1000 `mod` 250) ++ "/" ++ show spaceId ++ "/" ++
+  --                                                                           show (pageId  `mod` 250) ++ "/" ++ show (pageId  `div` 1000 `mod` 250) ++ "/" ++ show pageId  ++ "/" ++
+  --                                                                           show contentId ++ "/" ++ show hibernateVersion
 
   -- Content:
   -- title, parentid, child_position
