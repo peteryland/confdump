@@ -17,15 +17,15 @@ import Confluence.Format(confluenceToPandoc)
 -- data Space = Space { spaceName :: String, spaceDesc :: String, spaceHomePage :: Page }
 -- data Page = Page { pageTitle :: String, pageContents :: String, pageChildren :: [Page] }
 
-createPage :: [String] -> Page -> IO ()
-createPage fs (Page title contents children) = do
-  writeFile (title ++ ".page") $ confluenceToPandoc fs contents
+createPage :: Page -> IO ()
+createPage (Page title contents children) = do
+  writeFile (title ++ ".page") $ confluenceToPandoc contents
   case children of
     [] -> return ()
     _  -> do
       createDirectory title
       setCurrentDirectory title
-      mapM_ (createPage fs) children
+      mapM_ createPage children
       setCurrentDirectory ".."
 
 getData :: String -> IO ()
@@ -39,7 +39,7 @@ getData spacekey = do
     Just (Space title _ home) -> do
       createDirectory title
       setCurrentDirectory title
-      createPage [] home
+      createPage home
 
 main :: IO ()
 main = do
