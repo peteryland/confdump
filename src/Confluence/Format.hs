@@ -98,12 +98,13 @@ indent' = indentWith' "  "
 uriEncode :: String -> String -- just convert parens, Pandoc deals with everything else
 uriEncode = concatMap uriEncode'
   where
+    uriEncode' ' ' = "+"
     uriEncode' '(' = "%28"
     uriEncode' ')' = "%29"
     uriEncode' c = c:""
 
 findAnchor :: String -> String
-findAnchor la = la
+findAnchor la = uriEncode la
 
 findLink :: String -> String
 findLink l@('h':'t':'t':'p':':':_) = uriEncode l
@@ -186,6 +187,7 @@ showElem context (Tag tagname attrs elems) = showElem' context tagname (removeSo
     showElem' pc "ac:link" [Attr "ac:anchor" la] [Tag "ri:page" [Attr "ri:content-title" l] [], Tag "ac:plain-text-link-body" [] es] = showElemsBrackets pc es $ "(" ++ findLink l ++ "#" ++ findAnchor la ++ ")"
     showElem' pc "ac:link" [Attr "ac:anchor" la] [Tag "ri:page" [Attr "ri:content-title" l] [], Tag "ac:link-body" [] es] = showElemsBrackets pc es $ "(" ++ findLink l ++ "#" ++ findAnchor la ++ ")"
     showElem' pc "ac:link" [Attr "ac:anchor" la] [Tag "ac:plain-text-link-body" [] es] = showElemsBrackets pc es $ "(#" ++ findAnchor la ++ ")"
+    showElem' _  "ac:link" [Attr "ac:anchor" la] [] = "[" ++ la ++ "](#" ++ findAnchor la ++ ")"
     showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ ")")
     showElem' pc "ac:image" [Attr "ac:height" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){height=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){width=" ++ val ++ "}")
