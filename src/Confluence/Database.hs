@@ -1,11 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+module Confluence.Database(getSpace, Space(..), Page(..), Attachment(..)) where
 
-module Confluence.Database
-    ( getSpace,
-      Space(..),
-      Page(..),
-      Attachment(..),
-    ) where
+import Confluence.Utils(mapMaybeM)
 
 import System.FilePath((</>))
 import Data.Maybe(listToMaybe, fromMaybe)
@@ -38,13 +34,6 @@ instance Show Page where
 data DBContentType = DBCTPage | DBCTAttachment | DBCTSpaceDescription deriving (Show, Eq, Ord)
 data DBContent = DBContent { dbContentChildPositionOrVersion :: Int, dbContentId :: Int, dbContentType :: DBContentType, dbContentTitle :: String } deriving (Show, Eq, Ord)
 data DBSpace = DBSpace { dbSpaceId :: Int, dbSpaceName :: String, dbSpaceDescId :: Int, dbHomepage :: Int } deriving Show
-
--- from Control.Monad.Extra:
--- | A version of 'mapMaybe' that works with a monadic predicate.
-mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
-{-# INLINE mapMaybeM #-}
-mapMaybeM op = foldr f (return [])
-  where f x xs = do x' <- op x; case x' of Nothing -> xs; Just x'' -> do xs' <- xs; return $ x'':xs'
 
 queryBodyContent :: MySQLConn -> Int -> IO String
 queryBodyContent conn pageId = do
@@ -95,7 +84,7 @@ querySpace conn spacekey = do
 
 queryContent :: MySQLConn -> Int -> IO (SL.SortedList DBContent, IM.IntMap (SL.SortedList DBContent), IM.IntMap [DBContent])
 queryContent conn spaceid = do
-  s1 <- prepareStmt conn "SELECT CONTENTID, CONTENTTYPE, TITLE, PARENTID, CHILD_POSITION, PAGEID, VERSION FROM CONTENT WHERE SPACEID=? AND CONTENTTYPE<>'CUSTOM' AND CONTENT_STATUS='current'"
+  s1 <- prepareStmt conn "SELECT CONTENTID, CONTENTTYPE, TITLE, PARENTID, CHILD_POSITION, PAGEID, VERSION FROM CONTENT WHERE SPACEID=? AND CONTENTTYPE<>'CUSTOM' AND CONTENT_STATUS='current' AND PREVVER IS NULL"
   (_, is) <- queryStmt conn s1 [MySQLInt64 $ fromIntegral spaceid]
   unpackDBContent <$> S.toList is
   where
@@ -109,13 +98,13 @@ queryContent conn spaceid = do
                         in  (case (ctype', parentid, childpos, pageid) of
                               (Just DBCTPage,       MySQLNull,            MySQLInt32 childpos', MySQLNull)          -> (SL.insert (DBContent (fromIntegral childpos') contentid' DBCTPage title') tlpages, pagemap, attachmentmap)
                               (Just DBCTPage,       MySQLInt64 parentid', MySQLInt32 childpos', MySQLNull)          -> (tlpages, alter' (DBContent (fromIntegral childpos') contentid' DBCTPage title') (fromIntegral parentid') pagemap, attachmentmap)
-                              (Just DBCTPage,       MySQLInt64 parentid', MySQLNull           , MySQLNull)          -> (tlpages, alter' (DBContent 0                        contentid' DBCTPage title') (fromIntegral parentid') pagemap, attachmentmap)
+                              (Just DBCTPage,       MySQLInt64 parentid', MySQLNull,            MySQLNull)          -> (tlpages, alter' (DBContent 0                        contentid' DBCTPage title') (fromIntegral parentid') pagemap, attachmentmap)
                               (Just DBCTAttachment, MySQLNull,            MySQLNull,            MySQLInt64 pageid') -> (tlpages, pagemap, alter'' (DBContent (fromIntegral version) contentid' DBCTAttachment title') (fromIntegral pageid') attachmentmap)
                               _                                                                                     -> error $ "Unknown content type in space" ++ show [MySQLInt64 contentid, MySQLText ctype, MySQLText title, parentid, childpos, pageid, MySQLInt32 version]
                             )
     unpackDBContent (t:_) = error $ "Unknown content type in space: " ++ show t
-    alter'  val = IM.alter (Just . maybe mempty (SL.insert val))
-    alter'' val = IM.alter (Just . maybe mempty (val:))
+    alter'  val = IM.alter (Just . maybe (SL.singleton val) (SL.insert val))
+    alter'' val = IM.alter (Just . maybe [val] (val:))
     dbContentTypeFromText t = case T.unpack t of
       "PAGE"             -> Just DBCTPage
       "ATTACHMENT"       -> Just DBCTAttachment
