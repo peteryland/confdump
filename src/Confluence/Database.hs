@@ -12,7 +12,7 @@ import Database.MySQL.Base
 import qualified System.IO.Streams as S
 import qualified Data.IntMap as IM
 
-data Space = Space { spaceName :: String, spaceDesc :: String, spaceTopLevelPages :: [Page] }
+data Space = Space { spaceKey :: String, spaceName :: String, spaceDesc :: String, spaceTopLevelPages :: [Page] }
 data Page = Page { pageTitle :: String, pageContents :: String, pageChildren :: [Page], pageAttachments :: [Attachment] }
 data Attachment = Attachment { attachmentName :: String, attachmentFilePath :: String }
 
@@ -20,7 +20,8 @@ indent :: Int -> String -> String
 indent n = unlines . map (replicate n ' ' ++) . lines
 
 instance Show Space where
-  show space = unlines [ "Name: " ++ spaceName space,
+  show space = unlines [ "Key: " ++ spaceKey space,
+                         "Name: " ++ spaceName space,
                          "Description: " ++ spaceDesc space,
                          "Homepage: " ++ (fromMaybe "(No Homepage)" $ pageTitle <$> (listToMaybe $ spaceTopLevelPages space))
                        ]
@@ -70,7 +71,7 @@ getSpace conn spacekey = do
       desc <- queryBodyContent conn descid
       (tlpages, pagemap, attachmentmap) <- queryContent conn spaceid
       tlpages' <- mapMaybeM (getPage conn spaceid pagemap attachmentmap) (SL.fromSortedList tlpages)
-      return $ Just $ Space name desc tlpages'
+      return $ Just $ Space spacekey name desc tlpages'
 
 querySpace :: MySQLConn -> String -> IO (Maybe DBSpace)
 querySpace conn spacekey = do
