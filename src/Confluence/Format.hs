@@ -391,6 +391,7 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "ac:image" [Attr "ac:height" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "height=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:height" val, Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline height=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "width=" ++ val ++ "}")
+    showElem' pc "ac:image" [Attr "ac:thumbnail" "true", Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (replaceFileName (findLink pc p) f) ++ "){.inline width=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true", Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline width=" ++ val ++ "}")
     showElem' pc "ac:inline-comment-marker" _ es = showElems pc es
     showElem' _  "ac:parameter" [Attr "ac:name" "atlassian-macro-output-type"] [Text _] = "" -- macros are either always "inline" or always "block", so this parameter is actually unnecessary
@@ -420,9 +421,12 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "ol" _ es = "\n" ++ concatMap (showol pc) es
     showElem' pc "blockquote" _ _ | inSimpleTable pc = "\0"
     showElem' pc "blockquote" [] es = "\n" ++ indentWith "> " (unlines . dropWhile (=="") . lines $ showElems pc es) ++ "\n"
-    showElem' pc "ac:layout" [] es = "\n::: layout" ++ showElemsBlock pc es ++ ":::\n" -- FIXME: use markdown .columns (https://pandoc.org/MANUAL.html#columns - maybe just for slides)
-    showElem' pc "ac:layout-section" [Attr "ac:type" t] es = "\n::: {.layout-section ." ++ t ++ "}" ++ showElemsBlock pc es ++ ":::\n"
-    showElem' pc "ac:layout-cell" [] es = "\n::: cell" ++ showElemsBlock pc es ++ ":::\n"
+    --showElem' pc "ac:layout" [] es = "\n::: layout" ++ showElemsBlock pc es ++ ":::\n" -- FIXME: use markdown .columns (https://pandoc.org/MANUAL.html#columns - maybe just for slides)
+    --showElem' pc "ac:layout-section" [Attr "ac:type" t] es = "\n::: {.layout-section ." ++ t ++ "}" ++ showElemsBlock pc es ++ ":::\n"
+    --showElem' pc "ac:layout-cell" [] es = "\n::: cell" ++ showElemsBlock pc es ++ ":::\n"
+    showElem' pc "ac:layout" _ es = showElemsBlock pc es
+    showElem' pc "ac:layout-section" _ es = "\n::: columns" ++ showElemsBlock pc es ++ ":::\n"
+    showElem' pc "ac:layout-cell" _ es = "\n::: column" ++ showElemsBlock pc es ++ ":::\n"
     showElem' _  "img" as es = case lookup "class" (map (\(Attr n v) -> (n, v)) as) of
       Just ('e':'m':'o':'t':'i':'c':'o':'n':' ':'e':'m':'o':'t':'i':'c':'o':'n':'-':s) -> confToStandardEmoticon s
       _ -> traceShow ("ERROR"::String, as, es) ""
@@ -457,14 +461,6 @@ processMacroParams es = let (ps, es') = processMacroParams' es in (sort ps, es')
     filterParams "all" "true" ps restes = (ps, restes)
     filterParams "highlightColor" "@default" ps restes = (ps, restes)
     filterParams n v ps restes = ((n, v) : ps, restes)
-
-processMacroParamsS' :: [Elem] -> (String, [Elem])
-processMacroParamsS' es = let (ps, es') = processMacroParams es in (unwords $ mapMaybe processMacroParamS ps, es')
-  where
-    processMacroParamS ("class", v) = Just $ allclasses v
-    processMacroParamS ("align", "right") = Just "style=\"overflow: hidden; float: right;\""
-    processMacroParamS ("float", "right") = Just "style=\"overflow: hidden; float: right;\""
-    processMacroParamS (n, v) = Just $ n ++ "=\"" ++ v ++ "\""
 
 allclasses :: String -> String
 allclasses = unwords . map ('.':) . words
@@ -578,9 +574,20 @@ processMacro pc "multiexcerpt-include" es = let (pss, es') = processMacroParams 
 processMacro pc "expand" es = let (_, es') = processMacroParams es -- TODO
                               in  showElems pc es'
 processMacro _  "livesearch" _ = "<!-- live search used to be here -->\n" -- TODO
-processMacro pc "html-wrap" es = let (ps, es') = processMacroParamsS' es
-                                     output myes = "\n::: {" ++ ps ++ "}\n" ++ (trimlines $ showElems pc myes) ++ ":::\n"
-                                 in output es'
+processMacro pc "html-wrap" es = let (ps, es') = processMacroParams es
+                                     (ps', _) = processMacroParamsS' es
+                                     myclass = lookup "class" ps
+                                 in case myclass of
+                                      Just "menu" -> "::: infobox\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
+                                      Just "thumbnail" -> showElems pc es'
+                                      Just myclass' -> trace ("WARNING:" ++ pageName pc ++ ": other class: " ++ myclass') $ "\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
+                                      Nothing -> trace ("WARNING:" ++ pageName pc ++ ": no class") $ "\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
+  where
+    processMacroParamsS' es = let (ps, es') = processMacroParams es in (unwords $ mapMaybe processMacroParamS ps, es')
+    processMacroParamS ("class", v) = Just $ allclasses v
+    processMacroParamS ("align", "right") = Just "style=\"overflow: hidden; float: right;\""
+    processMacroParamS ("float", "right") = Just "style=\"overflow: hidden; float: right;\""
+    processMacroParamS (n, v) = Just $ n ++ "=\"" ++ v ++ "\""
 processMacro pc "include" [Tag "ac:parameter" [Attr "ac:name" ""] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:space-key" s, Attr "ri:content-title" l] []]]] = "[" ++ externWikiLink pc s l ++ "](!include)"
 processMacro pc "include" [Tag "ac:parameter" [Attr "ac:name" ""] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []]]] = "[" ++ findLink pc l ++ "](!include)"
 processMacro pc "bestpractice" es = mkBoxDiv pc "bestpractice" es
