@@ -132,10 +132,10 @@ trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
 
 trim' :: String -> String -> String
-trim' b s = case trim s of
-  "" -> ""
-  -- s' -> "%#&" ++ b ++ s' ++ b ++ "%#&"
-  s' -> b ++ s' ++ b
+trim' b s = case (trim s, safeHead s, safeLast '.' s) of
+  ("", _, _) -> " "
+  (s', Just h, l) -> (if isSpace h then h:"" else "") ++ b ++ s' ++ b ++ (if isSpace l then l:"" else "")
+  (_, _, _) -> ""
 
 indent' :: String -> String
 indent' = indentWith' "  "
@@ -202,6 +202,7 @@ decode pc = escapeDollars . decode' . unpack . toLazyText . htmlEncodedText . pa
     escapeDollars line = line
 
     decode' "" = ""
+    decode' ('\x00a0':s) = ' ':decode' s
     decode' ('\x2028':s) = '\n':decode' s
     decode' ('<':s) | not (inCode pc) = '&':'l':'t':';':decode' s
     decode' ('>':s) | not (inCode pc) = '&':'g':'t':';':decode' s
@@ -385,7 +386,7 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "ac:link" [] (Tag "ri:attachment" [Attr "ri:filename" t] []:[]) = "[" ++ t ++ "](/_showraw" ++ (replaceFileName (findLink pc $ pageName pc) t) ++ "){download=\"" ++ t ++ "\"}"
     showElem' pc "ac:link" [] (Tag "ri:attachment" [Attr "ri:filename" t] []:es) = showElemsBrackets pc { inLink = True } es $ "(/_showraw" ++ (replaceFileName (findLink pc $ pageName pc) t) ++ "){download=\"" ++ t ++ "\"}"
     showElem' _  "ac:link" [] [Tag "ri:user" _ []] = "[\\@Unknown User]{.user title=\"User linking not supported.\"}"
-    showElem' pc "ac:link" as es = trace ("WARNING: empty link on " ++ pageName pc ++ ": " ++ showElems pc es ++ ", attrs: " ++ show as) $ showElems pc es
+    showElem' pc "ac:link" _ es = showElems pc es -- empty link, ignore
     showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline}")
     showElem' pc "ac:image" [Attr "ac:height" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "height=" ++ val ++ "}")
@@ -407,9 +408,11 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' _  "pre" _ es | isEmpty es = ""
     showElem' pc "pre" _ es = trim' "`" $ showElems pc { inCode = True } es
     showElem' pc "em" _ es | inEm pc = trim $ showElems pc es
+    showElem' pc "em" _ es | inCode pc = "`" ++ showElem' pc { inCode = False } "em" [] [Tag "code" [] es] ++ "`"
     showElem' _  "em" _ es | isEmpty es = ""
     showElem' pc "em" _ es = trim' "*" $ showElems pc { inEm = True } es
     showElem' pc "strong" _ es | inStrong pc = trim $ showElems pc es
+    showElem' pc "strong" _ es | inCode pc = "`" ++ showElem' pc { inCode = False } "strong" [] [Tag "code" [] es] ++ "`"
     showElem' _  "strong" _ es | isEmpty es = ""
     showElem' pc "strong" _ es = trim' "**" $ showElems pc { inStrong = True } es
     showElem' pc "sup" _ es = "^" ++ showElems pc es ++ "^"
@@ -487,6 +490,7 @@ processMacro pc "children" es = let (_, es') = processMacroParams es
                                 in  case es' of
                                       [Tag "ac:parameter" [Attr "ac:name" "page"] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []]]] -> "[" ++ findLink pc l ++ "](!children)"
                                       _ -> "[](!children)"
+processMacro pc "anchor" [Tag "ac:parameter" [Attr "ac:name" ""] name] | inCode pc = "`[]{#" ++ (dropanc $ dropWhile (=='#') $ showElems pc name) ++ "}`"
 processMacro pc "anchor" [Tag "ac:parameter" [Attr "ac:name" ""] name] = "[]{#" ++ (dropanc $ dropWhile (=='#') $ showElems pc name) ++ "}"
 
 processMacro pc "mgnl-app-lauchner" es = let (pss, es') = processMacroParams es -- TODO
@@ -583,7 +587,7 @@ processMacro pc "html-wrap" es = let (ps, es') = processMacroParams es
                                       Just myclass' -> trace ("WARNING:" ++ pageName pc ++ ": other class: " ++ myclass') $ "\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
                                       Nothing -> trace ("WARNING:" ++ pageName pc ++ ": no class") $ "\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
   where
-    processMacroParamsS' es = let (ps, es') = processMacroParams es in (unwords $ mapMaybe processMacroParamS ps, es')
+    processMacroParamsS' es' = let (ps, es'') = processMacroParams es' in (unwords $ mapMaybe processMacroParamS ps, es'')
     processMacroParamS ("class", v) = Just $ allclasses v
     processMacroParamS ("align", "right") = Just "style=\"overflow: hidden; float: right;\""
     processMacroParamS ("float", "right") = Just "style=\"overflow: hidden; float: right;\""
@@ -642,6 +646,7 @@ showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "Style"] [Text _]:es) = showCodeMacro pc haveLang title attrs sections url es -- ignore
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "user"] [Text _]:es) = showCodeMacro pc haveLang title attrs sections url es -- ignore
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "password"] [Text _]:es) = showCodeMacro pc haveLang title attrs sections url es -- ignore
+showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "collapseType"] [Text _]:es) = showCodeMacro pc haveLang title attrs sections url es -- ignore
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" n] [Text v]:es) = trace ("WARNING: " ++ pageName pc ++ ": Unknown attribute in code macro: " ++ n ++ " = " ++ v) $ showCodeMacro pc haveLang title attrs sections url es
 showCodeMacro pc haveLang title attrs sections url es = "\n" ++ (withTitle title $ case url of
                                                                                      Nothing   -> "```" ++ t ++ "\n" ++ s ++ "\n```\n"
@@ -660,11 +665,11 @@ showCodeMacro pc haveLang title attrs sections url es = "\n" ++ (withTitle title
 
 showul :: ParseContext -> Elem -> String
 showul pc (Tag "li" _ [Tag "ul" _ es]) = concatMap (showul pc) es
-showul pc (Tag "li" _ es) = "* " ++ (indent' $ trimlines $ showElems pc es) ++ "\n" -- FIXME: don't ignore attributes
+showul pc (Tag "li" _ es) = "* " ++ (indent' $ trimlines $ showElems pc es) -- FIXME: don't ignore attributes
 showul pc e = showIndentTrim' pc "  " [e]
 
 showol :: ParseContext -> Elem -> String
-showol pc (Tag "li" _ es) = "#. " ++ (indentWith' "   " $ trimlines $ showElems pc es) ++ "\n" -- FIXME: don't ignore attributes
+showol pc (Tag "li" _ es) = "#. " ++ (indentWith' "   " $ trimlines $ showElems pc es) -- FIXME: don't ignore attributes
 showol pc e = showIndentTrim' pc "   " [e]
 
 asciiletter :: GenParser Char st Char
