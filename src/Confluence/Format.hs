@@ -250,11 +250,33 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     removeSomeStyle ((Attr "class" "auto-cursor-target"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "toc-item-body"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "font-color-normal"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "editable-field inactive"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "wiki-content"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "topictitle"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "title" "Click to edit"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "title" "Follow link"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "caption"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "pm-h4"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "nolink"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "c-link"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "c-message__body"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "v-table-cell-wrapper"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "text"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" ('s':'y':'n':'t':'a':'x':'h':'i':'g':'h':'l':'i':'g':'h':'t':'e':'r':' ':_)):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "page"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "title" "Page 1"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "line number1 index0 alt2"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "external-link"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "external"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "paragraph"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" ('h':'i':'g':'h':'l':'i':'g':'h':'t':'-':_)):as) = removeSomeStyle as
     removeSomeStyle ((Attr "title" ('B':'a':'c':'k':'g':'r':'o':'u':'n':'d':' ':'c':'o':'l':'o':'u':'r':' ':_)):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "wrapped"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "text-image__text--heading h3 "):as) = removeSomeStyle as
+
     removeSomeStyle ((Attr "data-highlight-colour" _):as) = removeSomeStyle as
     removeSomeStyle ((Attr "rel" "nofollow"):as) = removeSomeStyle as -- drop the rel="nofollow" since this is not user-generated content
+    removeSomeStyle ((Attr "style" ""):as) = removeSomeStyle as
     removeSomeStyle (a@(Attr "style" s):as) = case parse style "" s of
                                             Left _   -> a:removeSomeStyle as
                                             Right ss -> case removeStyleElems ss of
@@ -319,10 +341,8 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "span" [Attr "title" ""] es = showElems pc es
     showElem' pc "span" [Attr "style" s] es = showElemsBrackets' pc es $ "{style=\"" ++ s ++ "\"}"
     showElem' pc "span" as es = case lookup "class" (map (\(Attr n v) -> (n, v)) as) of
-      Just "nolink" -> showElems pc es
-      Just "external-link" -> showElems pc es
       Just ('e':'m':'o':'t':'i':'c':'o':'n':' ':'e':'m':'o':'t':'i':'c':'o':'n':'-':s) -> confToStandardEmoticon s ++ showElems pc es
-      Just s -> showElemsBrackets' pc es $ "{." ++ s ++ "}"
+      Just s -> showElemsBrackets pc es $ "{." ++ s ++ "}"
       _ -> traceShow ("ERROR"::String, as, es) ""
     showElem' _  "hr" [] [] = "---\n"
     showElem' pc "br" _ [] | inSimpleTable pc = ""
@@ -355,9 +375,10 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "div" [Attr "class" "content-wrapper", Attr "style" s] es = "[" ++ (trim $ trimlines $ showElems pc es) ++ "]{style=\"" ++ s ++ "\"}"
     showElem' pc "div" [Attr "class" "tablesorter-header-inner"] es = (trim $ trimlines $ showElems pc es)
     showElem' pc "div" [Attr "class" "content-wrapper"] es = (trim $ trimlines $ showElems pc es)
-    showElem' pc "div" [Attr "class" "paragraph"] es = showElem' pc "p" [] es
-    showElem' pc "div" [Attr "class" "syntaxhighlighter nogutter html"] es = showElemsBlock pc es
+    showElem' pc "div" [Attr "class" "layoutArea"] es = "\n::: columns" ++ showElemsBlock pc es ++ ":::\n"
+    showElem' pc "div" [Attr "class" "column"] es = "\n::: column" ++ showElemsBlock pc es ++ ":::\n"
     -- showElem' pc "div" [] es = "\n::: {}\n" ++ showIndentTrim pc es ++ ":::\n"
+    showElem' pc "div" [Attr "class" c] es = "\n::: " ++ c ++ showElemsBlock pc es ++ ":::\n"
     showElem' pc "div" [] es = showElemsBlock pc es
     showElem' pc "h1" [] es = "\n# " ++ showElems pc es ++ "\n"
     showElem' pc "h2" [] es = "\n## " ++ showElems pc es ++ "\n"
@@ -367,10 +388,8 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "h6" [] es = "\n###### " ++ showElems pc es ++ "\n"
     showElem' pc "a" [Attr "href" l] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ ")"
     showElem' pc "a" [Attr "class" c, Attr "href" l, Attr "title" t] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){" ++ allclasses c ++ " title=\"" ++ t ++ "\"}"
-    showElem' pc "a" [Attr "class" "external-link", Attr "href" l] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ ")"
-    showElem' pc "a" [Attr "class" "external-link", Attr "href" l, Attr "style" s] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){style=\"" ++ s ++ "\"}"
-    showElem' pc "a" [Attr "class" "external", Attr "href" l] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ ")"
-    showElem' pc "a" [Attr "class" "external", Attr "href" l, Attr "style" s] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){style=\"" ++ s ++ "\"}"
+    showElem' pc "a" [Attr "href" l, Attr "title" t] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){title=\"" ++ t ++ "\"}"
+    showElem' pc "a" [Attr "href" l, Attr "style" s] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){style=\"" ++ s ++ "\"}"
     showElem' _  "ac:emoticon" [Attr "ac:name" s] [] = confToStandardEmoticon s
     showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []] | inCode pc = "`[`" ++ l ++ "`](" ++ findLink pc l ++ ")`"
     showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []] = "[" ++ l ++ "](" ++ findLink pc l ++ ")"
@@ -387,7 +406,7 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "ac:link" [] (Tag "ri:attachment" [Attr "ri:filename" t] []:es) = showElemsBrackets pc { inLink = True } es $ "(/_showraw" ++ (replaceFileName (findLink pc $ pageName pc) t) ++ "){download=\"" ++ t ++ "\"}"
     showElem' _  "ac:link" [] [Tag "ri:user" _ []] = "[\\@Unknown User]{.user title=\"User linking not supported.\"}"
     showElem' pc "ac:link" _ es = showElems pc es -- empty link, ignore
-    showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline}")
+    showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ ")")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline}")
     showElem' pc "ac:image" [Attr "ac:height" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "height=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:height" val, Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline height=" ++ val ++ "}")
@@ -433,7 +452,9 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' _  "img" as es = case lookup "class" (map (\(Attr n v) -> (n, v)) as) of
       Just ('e':'m':'o':'t':'i':'c':'o':'n':' ':'e':'m':'o':'t':'i':'c':'o':'n':'-':s) -> confToStandardEmoticon s
       _ -> traceShow ("ERROR"::String, as, es) ""
-    showElem' pc t as es = "<" ++ t ++ show as ++ ">" ++ showElemsBlock pc es ++ "</" ++ t ++ ">"
+    showElem' pc "ac:task-list" _ es = showElemsBlock pc es
+    showElem' pc "ac:task" _ [Text _, Tag "ac:task-id" _ _, Text _, Tag "ac:task-status" _ [Text taskstatus], Text _, Tag "ac:task-body" _ [Text taskbody], Text _] = "\n- [" ++ (if trim taskstatus == "complete" then "x" else " ") ++ "]" ++ if not $ null $ trim taskbody then ' ':trim taskbody else "" ++ "\n"
+    showElem' pc t as es = traceShowId $ "<" ++ t ++ show as ++ ">" ++ showElemsBlock pc es ++ "</" ++ t ++ ">"
 
 isli :: Elem -> Bool
 isli (Tag "li" _ _) = True
@@ -550,7 +571,7 @@ processMacro pc "details" es = showElems pc es
 processMacro pc "excerpt" es = let (_, es') = processMacroParams es
                                in  "\n::: excerpt\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
 processMacro pc "excerpt-include" es = let (pss, es') = processMacroParams es
-                                           pan = if lookup "nopanel" pss == Just "true" then id else \x -> "\n::: excerpt-panel\n  " ++ x ++ "\n:::\n"
+                                           pan = id -- if lookup "nopanel" pss == Just "true" then id else \x -> "\n::: excerpt-panel\n  " ++ x ++ "\n:::\n"
                                            link = case es' of
                                                    [Tag "ac:parameter" [Attr "ac:name" ""] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []]]] -> findLink pc l
                                                    [Tag "ac:parameter" [Attr "ac:name" ""] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:space-key" s, Attr "ri:content-title" l] []]]] -> externWikiLink pc s l
@@ -562,7 +583,7 @@ processMacro pc "multiexcerpt" es = let (pss, es') = processMacroParams es
                                                  Nothing    -> "excerpt"
                                     in  "\n::: " ++ name ++ "\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
 processMacro pc "multiexcerpt-include" es = let (pss, es') = processMacroParams es
-                                                pan = if lookup "nopanel" pss == Just "true" then id else \x -> "\n::: excerpt-panel\n  " ++ x ++ "\n:::\n"
+                                                pan = id -- if lookup "nopanel" pss == Just "true" then id else \x -> "\n::: excerpt-panel\n  " ++ x ++ "\n:::\n"
                                                 name = case lookup "MultiExcerptName" pss of
                                                          Just name' -> '#':toIdent name'
                                                          Nothing -> ""
@@ -582,7 +603,7 @@ processMacro pc "html-wrap" es = let (ps, es') = processMacroParams es
                                      (ps', _) = processMacroParamsS' es
                                      myclass = lookup "class" ps
                                  in case myclass of
-                                      Just "menu" -> "::: infobox\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
+                                      Just "menu" -> "\n::: infobox\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
                                       Just "thumbnail" -> showElems pc es'
                                       Just myclass' -> trace ("WARNING:" ++ pageName pc ++ ": other class: " ++ myclass') $ "\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
                                       Nothing -> trace ("WARNING:" ++ pageName pc ++ ": no class") $ "\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
@@ -612,13 +633,17 @@ processMacro pc "table-plus" es = let (pss, es') = processMacroParams es
                                       output (t1@(Tag "table" _ _):e2:restes) = output [t1] ++ output (e2:restes)
                                       output myes = error $ "Unhandled table-plus macro\n!!!table\n{" ++ ps ++ "}\n" ++ showElems pc myes ++ "!!!end table\n"
                                   in output es'
--- processMacro pc "toc" es = let (ps, es') = processMacroParamsS' es in "#toc" ++ ps ++ "\n" ++ showElems pc es'
 processMacro _  "toc" _ = "[](!toc)"
-processMacro _ _ _ = "" -- unknown macro, ignore for demo purposes
--- processMacro pc name es = let (ps, es') = processMacroParamsS es in trace ("\n!" ++ name ++ ps ++ show es') (if null es' then "" else showElemsBlock pc es')
-  -- where
-    -- processMacroParamsS es' = let (ps, es'') = processMacroParams es' in (concatMap processMacroParamS ps, es'')
-    -- processMacroParamS (n, v) = "(" ++ n ++ "=\"" ++ v ++ "\")"
+processMacro pc "section" es = let (_, es') = processMacroParams es -- ignore parameters
+                               in  "\n::: columns" ++ showElemsBlock pc es' ++ ":::\n"
+processMacro pc "column" es = let (_, es') = processMacroParams es -- ignore width parameter
+                              in  "\n::: column" ++ showElemsBlock pc es' ++ ":::\n"
+processMacro _  "comment" _ = ""
+-- processMacro _ _ _ = "" -- unknown macro, ignore for demo purposes
+processMacro pc name es = let (ps, es') = processMacroParamsS es in trace ("\n!" ++ name ++ ps ++ show es') (if null es' then "" else showElemsBlock pc es')
+  where
+    processMacroParamsS es' = let (ps, es'') = processMacroParams es' in (concatMap processMacroParamS ps, es'')
+    processMacroParamS (n, v) = "(" ++ n ++ "=\"" ++ v ++ "\")"
 
 mkBoxDiv :: ParseContext -> String -> [Elem] -> String
 mkBoxDiv pc boxtype es = let (pss, es') = processMacroParams es
