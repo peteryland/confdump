@@ -4,7 +4,7 @@ module Confluence.Database(getSpace, Space(..), Page(..), Attachment(..)) where
 import Confluence.Utils(mapMaybeM)
 
 import System.FilePath((</>))
-import Data.Maybe(listToMaybe, fromMaybe)
+import Data.Maybe(listToMaybe, fromMaybe, mapMaybe)
 import Data.Monoid(mempty)
 import qualified Data.SortedList as SL
 import qualified Data.Text as T
@@ -13,7 +13,7 @@ import qualified System.IO.Streams as S
 import qualified Data.IntMap as IM
 
 data Space = Space { spaceKey :: String, spaceName :: String, spaceDesc :: String, spaceTopLevelPages :: [Page] }
-data Page = Page { pageTitle :: String, pageContents :: String, pageChildren :: [Page], pageAttachments :: [Attachment] }
+data Page = Page { pageTitle :: String, pageContents :: String, pageChildren :: [Page], pageAttachments :: [Attachment], pageLabels :: [String] }
 data Attachment = Attachment { attachmentName :: String, attachmentFilePath :: String }
 
 indent :: Int -> String -> String
@@ -46,6 +46,16 @@ queryBodyContent conn pageId = do
     unwrapMySQLText (Just (MySQLText t)) = T.unpack t
     unwrapMySQLText _ = ""
 
+queryLabels :: MySQLConn -> Int -> IO [String]
+queryLabels conn pageId = do
+  s <- prepareStmt conn "SELECT LABEL.NAME FROM LABEL, CONTENT_LABEL WHERE LABEL.LABELID=CONTENT_LABEL.LABELID AND LABEL.NAMESPACE='global' AND CONTENT_LABEL.CONTENTID=?"
+  (_, pagelabels) <- queryStmt conn s [MySQLInt64 $ fromIntegral pageId]
+  labels <- S.toList pagelabels
+  return $ mapMaybe unwrapLabelText labels
+  where
+    unwrapLabelText [MySQLText t] = Just $ T.unpack t
+    unwrapLabelText _ = Nothing
+
 getAttachment :: Int -> Int -> DBContent -> IO (Maybe Attachment)
 getAttachment spaceid pageid (DBContent version contentid DBCTAttachment name) = return $ Just $ Attachment name filepath
   where
@@ -57,9 +67,10 @@ getAttachment _ _ _ = return Nothing
 getPage :: MySQLConn -> Int -> IM.IntMap (SL.SortedList DBContent) -> IM.IntMap [DBContent] -> DBContent -> IO (Maybe Page)
 getPage conn spaceid pagemap attachmentmap (DBContent _ pageid DBCTPage title) = do
   bodycontent <- queryBodyContent conn pageid
+  labels <- queryLabels conn pageid
   children <- mapMaybeM (getPage conn spaceid pagemap attachmentmap) $ maybe [] id $ SL.fromSortedList <$> IM.lookup pageid pagemap
   attachments <- mapMaybeM (getAttachment spaceid pageid) $ maybe [] id $ IM.lookup pageid attachmentmap
-  return $ Just $ Page title bodycontent children attachments
+  return $ Just $ Page title bodycontent children attachments labels
 getPage _ _ _ _ _ = return Nothing
 
 getSpace :: MySQLConn -> String -> IO (Maybe Space)

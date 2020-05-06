@@ -5,6 +5,7 @@ module Main where
 import Password(confPass)
 
 import Data.Char(isSpace)
+import Data.List(intercalate)
 import Data.Map(Map, empty, insert, fromList)
 import Control.Monad(forM_)
 import Control.Exception(catch, IOException)
@@ -22,11 +23,11 @@ import Debug.Trace
 
 -- From Confluence.Database:
 -- data Space = Space { spaceKey :: String, spaceName :: String, spaceDesc :: String, spaceTopLevelPages :: [Page] }
--- data Page = Page { pageTitle :: String, pageContents :: String, pageChildren :: [Page], pageAttachments :: [Attachment] }
+-- data Page = Page { pageTitle :: String, pageContents :: String, pageChildren :: [Page], pageAttachments :: [Attachment], pageLabels :: [String] }
 -- data Attachment = Attachment { attachmentName :: String, attachmentFilePath :: String }
 
 encodeFilename :: String -> String
-encodeFilename ('_':s) = 'I':encodeFilename s -- remove leading underscores from filenames
+-- encodeFilename ('_':s) = 'I':encodeFilename s -- remove leading underscores from filenames
 encodeFilename s = encodeFilename' s
   where
     encodeFilename' ""      = ""
@@ -42,7 +43,7 @@ copyAttachment path name = do
     putStrLn $ "Could not find file: " ++ path
 
 createPage :: String -> Map (String, String) String -> Map String String -> [String] -> Page -> IO ()
-createPage spacekey pm am spacekeys (Page title contents children attachments) = do
+createPage spacekey pm am spacekeys (Page title contents children attachments labels) = do
   let title' = encodeFilename title
   case (title', children) of
     ("", _) -> return ()
@@ -60,22 +61,24 @@ createPage spacekey pm am spacekeys (Page title contents children attachments) =
       let filename = title''' ++ ".page"
       removeFile filename `catch` ignoreError
       -- writeFile filename $ (if title'' == title''' then "" else "---\ntitle: " ++ title'' ++ "\n...\n\n") ++ contents'
-      writeFile filename $ "---\ntitle: " ++ title'' ++ "\n...\n\n" ++ contents'
+      writeFile filename $ "---\ntitle: " ++ title'' ++ labelText labels ++ "\n...\n\n" ++ contents'
     ignoreError :: IOException -> IO ()
     ignoreError _ = return ()
+    labelText [] = ""
+    labelText ls = "\nkeywords: [" ++ intercalate ", " ls ++ "]"
 
 createPageMap :: [(String, Page)] -> Map (String, String) String
 createPageMap = createPageMap' "/" empty
   where
     createPageMap' _ pm [] = pm
-    createPageMap' path pm ((spacekey, Page title _ children _):ps) = let title' = encodeFilename title
-                                                                          path' = path </> title'
-                                                                      in  createPageMap' path (createPageMap' path' (insert (spacekey, title') path' pm) $ map (\p -> (spacekey, p)) children) ps
+    createPageMap' path pm ((spacekey, Page title _ children _ _):ps) = let title' = encodeFilename title
+                                                                            path' = path </> title'
+                                                                        in  createPageMap' path (createPageMap' path' (insert (spacekey, title') path' pm) $ map (\p -> (spacekey, p)) children) ps
 
 createAnchorMap :: [Page] -> Map String String
 createAnchorMap ps = fromList $ map makeMapping $ concatMap createAnchors ps
   where
-    createAnchors (Page _ contents children _) = getHeaders contents ++ concatMap createAnchors children
+    createAnchors (Page _ contents children _ _) = getHeaders contents ++ concatMap createAnchors children
     makeMapping name = (filter (not . isSpace) name, toIdent name)
 
 getData :: [String] -> IO ()
