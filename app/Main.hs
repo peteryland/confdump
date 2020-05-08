@@ -4,9 +4,9 @@ module Main where
 
 import Password(confPass)
 
-import Data.Char(isSpace)
+import Data.Char(isSpace, toLower)
 import Data.List(intercalate)
-import Data.Map(Map, empty, insert, fromList)
+import Data.Map(Map, empty, insert, fromList, mapKeys)
 import Control.Monad(forM_)
 import Control.Exception(catch, IOException)
 import System.Environment(getArgs)
@@ -42,8 +42,8 @@ copyAttachment path name = do
   else
     putStrLn $ "Could not find file: " ++ path
 
-createPage :: String -> Map (String, String) String -> Map String String -> [String] -> Page -> IO ()
-createPage spacekey pm am spacekeys (Page title contents children attachments labels) = do
+createPage :: String -> Map (String, String) String -> Map (String, String) String -> Map String String -> [String] -> Page -> IO ()
+createPage spacekey pm pmci am spacekeys (Page title contents children attachments labels) = do
   let title' = encodeFilename title
   case (title', children) of
     ("", _) -> return ()
@@ -52,10 +52,10 @@ createPage spacekey pm am spacekeys (Page title contents children attachments la
       convertAndWritePage title title'
       createDirectoryIfMissing False title'
       setCurrentDirectory title'
-      mapM_ (createPage spacekey pm am spacekeys) children
+      mapM_ (createPage spacekey pm pmci am spacekeys) children
       setCurrentDirectory ".."
   where
-    contents' = confluenceToPandoc spacekey title pm am spacekeys contents
+    contents' = confluenceToPandoc spacekey title pm pmci am spacekeys contents
     convertAndWritePage title'' title''' = do
       mapM_ (\(Attachment name path) -> copyAttachment path name) attachments
       let filename = title''' ++ ".page"
@@ -86,11 +86,12 @@ getData spacekeys = do
   conn <- connect defaultConnectInfo {ciUser = "confluence", ciPassword = confPass, ciDatabase = "confluence"}
   spaces <- mapMaybeM (getSpace conn) spacekeys
   let pm = createPageMap $ concatMap (\s -> map (\p -> (spaceKey s, p)) $ spaceTopLevelPages s) spaces
+  let pmci = mapKeys (fmap $ map toLower) pm
   let am = createAnchorMap $ concatMap spaceTopLevelPages spaces
   forM_ spaces $ \(Space spacekey title _ tlpages) -> do
     createDirectoryIfMissing False title
     setCurrentDirectory title
-    forM_ tlpages (createPage spacekey pm am spacekeys)
+    forM_ tlpages (createPage spacekey pm pmci am spacekeys)
     setCurrentDirectory ".."
 
 main :: IO ()

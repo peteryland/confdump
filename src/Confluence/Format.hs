@@ -6,9 +6,9 @@ import Debug.Trace
 
 import Confluence.Utils(toIdent, safeHead)
 import System.FilePath (replaceFileName)
-import Data.Char(isSpace, isAlphaNum)
+import Data.Char(isSpace, isAlphaNum, toLower)
 import Data.Maybe(mapMaybe)
-import Data.List(intersperse, sort, isPrefixOf, isInfixOf, isSuffixOf, (\\)) --, intercalate)
+import Data.List(intersperse, sort, isPrefixOf, isInfixOf, isSuffixOf, (\\), findIndex) --, intercalate)
 import Data.Text(pack)
 import Data.Text.Lazy(unpack)
 import Data.Text.Lazy.Builder(toLazyText)
@@ -37,6 +37,7 @@ showStyle s = unwords $ map show s
 data ParseContext = PC { spaceKey :: String
                        , pageName :: String
                        , pagemap :: M.Map (String, String) String
+                       , pagemapci :: M.Map (String, String) String
                        , anchormap :: M.Map String String
                        , spacekeys :: [String]
                        , inLink :: Bool
@@ -103,16 +104,16 @@ showElemsBrackets' pc es ss = let s = showElems pc es
 
 showElemsBlock :: ParseContext -> [Elem] -> String
 showElemsBlock pc es = case showElems pc es of
-  "" -> "\n"
-  " " -> "\n"
-  "  " -> "\n"
-  s -> '\n':s ++ "\n"
+  "" -> "\n\n"
+  " " -> "\n\n"
+  "  " -> "\n\n"
+  s -> '\n':'\n':s ++ "\n"
 
 showElemsBlock' :: ParseContext -> [Elem] -> String -> String -> String
 showElemsBlock' pc es pre post = case trim $ showElems pc es of
-  "" -> "\n"
-  "\\" -> "\n"
-  s -> '\n':pre ++ '\n':'\n':s ++ '\n':'\n':post ++ "\n"
+  "" -> "\n\n"
+  "\\" -> "\n\n"
+  s -> '\n':'\n':pre ++ '\n':'\n':s ++ '\n':'\n':post ++ "\n"
 
 indentWith :: String -> String -> String
 indentWith s = unlines . map' (s ++) . lines
@@ -196,13 +197,13 @@ externWikiLink _ k l = '/' : k ++ '/' : uriEncode l
 
 findLink' :: ParseContext -> [String] -> String -> [Char]
 -- findLink' pc keys ('_':l) = findLink' pc keys ('I':l)
-findLink' pc keys l = case findBest (keys ++ (spacekeys pc \\ keys)) l (pagemap pc) of
+findLink' pc keys l = case findBest (keys ++ (spacekeys pc \\ keys)) l (pagemap pc) (pagemapci pc) of
   Just ('/':'_':'I':'n':'c':'l':'u':'s':'i':'o':'n':'s':' ':'l':'i':'b':'r':'a':'r':'y':'/':l') -> "/_i/" ++ uriEncode l'
   Just l' -> uriEncode l'
   Nothing -> '/':uriEncode l
 
-findBest :: [String] -> String -> M.Map (String, String) String -> Maybe String
-findBest keys linkname pm = safeHead $ mapMaybe (\k -> M.lookup (k, linkname) pm) keys
+findBest :: [String] -> String -> M.Map (String, String) String -> M.Map (String, String) String -> Maybe String
+findBest keys linkname pm pmci = safeHead $ mapMaybe (\k -> M.lookup (k, linkname) pm) keys ++ mapMaybe (\k -> M.lookup (k, map toLower linkname) pmci) keys
 
 decode :: ParseContext -> String -> String
 decode pc = escapeDollars . decode' . unpack . toLazyText . htmlEncodedText . pack
@@ -277,6 +278,7 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     removeSomeStyle ((Attr "class" "line number1 index0 alt2"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "external-link"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "external"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "external text"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "external external-icon"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "paragraph"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" ('h':'i':'g':'h':'l':'i':'g':'h':'t':'-':_)):as) = removeSomeStyle as
@@ -345,17 +347,17 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
                            then "<table>\n" ++ t' ++ "</table>\n"
                            else if n == 0
                                   then "" -- contentless table
-                                  else "\n" ++ (if null h' then "||\n" else h') ++ (intersperse '-' $ replicate n '|') ++ "\n" ++ b' ++ "\n"
+                                  else "\n\n" ++ (if null h' then "||\n" else h') ++ (intersperse '-' $ replicate n '|') ++ "\n" ++ b' ++ "\n"
                        -- in  case (notsimple, s) of
       -- (True, Nothing)  -> "<table>\n" ++ t' ++ "</table>\n"
       -- (True, Just s')  -> "<table class=\"" ++ s' ++ "\">\n" ++ t' ++ "</table>\n"
-      -- (False, Nothing) -> "\n||\n|-|-|-|-|-|\n" ++ t ++ "\n"
+      -- (False, Nothing) -> "\n\n||\n|-|-|-|-|-|\n" ++ t ++ "\n"
       -- (False, Just s') -> "::: " ++ s' ++ "\n  ||||||\n  |-|-|-|-|-|\n" ++ indent t ++ "\n:::\n"
 
     showElem' pc "p" [] es = ('\n':) $ trimlines $ showElemsBlock pc es
-    showElem' pc "p" [Attr "style" s] es = "\n" ++ (showElemsBrackets' pc es $ "{style=\"" ++ s ++ "\"}") ++ "\n"
+    showElem' pc "p" [Attr "style" s] es = "\n\n" ++ (showElemsBrackets' pc es $ "{style=\"" ++ s ++ "\"}") ++ "\n"
     showElem' pc "p" as es = case lookup "class" (map (\(Attr n v) -> (n, v)) as) of
-      Just ('e':'m':'o':'t':'i':'c':'o':'n':' ':'e':'m':'o':'t':'i':'c':'o':'n':'-':s) -> "\n" ++ confToStandardEmoticon s ++ " " ++ showElems pc es ++ "\n"
+      Just ('e':'m':'o':'t':'i':'c':'o':'n':' ':'e':'m':'o':'t':'i':'c':'o':'n':'-':s) -> "\n\n" ++ confToStandardEmoticon s ++ " " ++ showElems pc es ++ "\n"
       Just _ -> ('\n':) $ trimlines $ showElemsBlock pc es
       _ -> traceShow ("ERROR"::String, pageName pc, as, es) ""
     showElem' pc "span" [] es = showElems pc es
@@ -385,6 +387,7 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "td" _ es | inSimpleTable pc = "|" ++ (trim $ trimlines $ showElems pc es) -- FIXME: make sure left-margin styles on TRs and TDs are supported by simple tables
     showElem' pc "td" [] es = "<td>\n" ++ showIndentTrimTable pc es ++ "</td>\n"
     showElem' pc "td" [Attr "colspan" cs] es = "<td colspan=\"" ++ cs ++ "\">\n" ++ showIndentTrimTable pc es ++ "</td>\n"
+    showElem' pc "td" [Attr "colspan" cs, Attr "style" s] es = "<td colspan=\"" ++ cs ++ "\" style=\"" ++ s ++ "\">\n" ++ showIndentTrimTable pc es ++ "</td>\n"
     showElem' pc "td" [Attr "rowspan" cs] es = "<td rowspan=\"" ++ cs ++ "\">\n" ++ showIndentTrimTable pc es ++ "</td>\n"
     showElem' pc "td" [Attr "style" s] es = "<td style=\"" ++ s ++ "\">\n" ++ showIndentTrimTable pc es ++ "</td>\n"
     showElem' pc "th" [Attr "colspan" _] _ | inSimpleTable pc = "\0"
@@ -398,15 +401,15 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "div" [Attr "class" "content-wrapper"] es = (trim $ trimlines $ showElems pc es)
     showElem' pc "div" [Attr "class" "layoutArea"] es = showElemsBlock' pc es "::: columns" ":::"
     showElem' pc "div" [Attr "class" "column"] es = showElemsBlock' pc es "::: column" ":::"
-    -- showElem' pc "div" [] es = "\n::: {}\n" ++ showIndentTrim pc es ++ ":::\n"
-    showElem' pc "div" [Attr "class" c] es = "\n::: " ++ c ++ showElemsBlock pc es ++ ":::\n"
+    -- showElem' pc "div" [] es = "\n\n::: {}\n" ++ showIndentTrim pc es ++ ":::\n"
+    showElem' pc "div" [Attr "class" c] es = "\n\n::: " ++ c ++ showElemsBlock pc es ++ ":::\n"
     showElem' pc "div" [] es = showElemsBlock pc es
-    showElem' pc "h1" _ es = "\n# " ++ showElems pc es ++ "\n"
-    showElem' pc "h2" _ es = "\n## " ++ showElems pc es ++ "\n"
-    showElem' pc "h3" _ es = "\n### " ++ showElems pc es ++ "\n"
-    showElem' pc "h4" _ es = "\n#### " ++ showElems pc es ++ "\n"
-    showElem' pc "h5" _ es = "\n##### " ++ showElems pc es ++ "\n"
-    showElem' pc "h6" _ es = "\n###### " ++ showElems pc es ++ "\n"
+    showElem' pc "h1" _ es = "\n\n# " ++ showElems pc es ++ "\n"
+    showElem' pc "h2" _ es = "\n\n## " ++ showElems pc es ++ "\n"
+    showElem' pc "h3" _ es = "\n\n### " ++ showElems pc es ++ "\n"
+    showElem' pc "h4" _ es = "\n\n#### " ++ showElems pc es ++ "\n"
+    showElem' pc "h5" _ es = "\n\n##### " ++ showElems pc es ++ "\n"
+    showElem' pc "h6" _ es = "\n\n###### " ++ showElems pc es ++ "\n"
     showElem' pc "label" [] es = showElems pc es
     showElem' pc "a" [] es = showElems pc es
     showElem' pc "a" [Attr "href" l] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ ")"
@@ -473,10 +476,10 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "ol" _ es | all (not . isli) es = showElems pc es -- ol with no lis
     showElem' pc "ol" _ es = "\n" ++ concatMap (showol pc) es
     showElem' pc "blockquote" _ _ | inSimpleTable pc = "\0"
-    showElem' pc "blockquote" [] es = "\n" ++ indentWith "> " (unlines . dropWhile (=="") . lines $ showElems pc es) ++ "\n"
-    --showElem' pc "ac:layout" [] es = "\n::: layout" ++ showElemsBlock pc es ++ ":::\n" -- FIXME: use markdown .columns (https://pandoc.org/MANUAL.html#columns - maybe just for slides)
-    --showElem' pc "ac:layout-section" [Attr "ac:type" t] es = "\n::: {.layout-section ." ++ t ++ "}" ++ showElemsBlock pc es ++ ":::\n"
-    --showElem' pc "ac:layout-cell" [] es = "\n::: cell" ++ showElemsBlock pc es ++ ":::\n"
+    showElem' pc "blockquote" [] es = "\n\n" ++ indentWith "> " (unlines . dropWhile (=="") . lines $ showElems pc es) ++ "\n"
+    --showElem' pc "ac:layout" [] es = "\n\n::: layout" ++ showElemsBlock pc es ++ ":::\n" -- FIXME: use markdown .columns (https://pandoc.org/MANUAL.html#columns - maybe just for slides)
+    --showElem' pc "ac:layout-section" [Attr "ac:type" t] es = "\n\n::: {.layout-section ." ++ t ++ "}" ++ showElemsBlock pc es ++ ":::\n"
+    --showElem' pc "ac:layout-cell" [] es = "\n\n::: cell" ++ showElemsBlock pc es ++ ":::\n"
     showElem' pc "ac:layout" _ es = showElemsBlock pc es
     showElem' pc "ac:layout-section" _ es = showElemsBlock' pc es "::: columns" ":::"
     showElem' pc "ac:layout-cell" _ es = showElemsBlock' pc es "::: column" ":::"
@@ -484,7 +487,7 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
       Just ('e':'m':'o':'t':'i':'c':'o':'n':' ':'e':'m':'o':'t':'i':'c':'o':'n':'-':s) -> confToStandardEmoticon s
       _ -> traceShow ("ERROR"::String, pageName pc, as, es) ""
     showElem' pc "ac:task-list" _ es = showElemsBlock pc es
-    showElem' _  "ac:task" _ [Text _, Tag "ac:task-id" _ _, Text _, Tag "ac:task-status" _ [Text taskstatus], Text _, Tag "ac:task-body" _ [Text taskbody], Text _] = "\n- [" ++ (if trim taskstatus == "complete" then "x" else " ") ++ "]" ++ if not $ null $ trim taskbody then ' ':trim taskbody else "" ++ "\n"
+    showElem' _  "ac:task" _ [Text _, Tag "ac:task-id" _ _, Text _, Tag "ac:task-status" _ [Text taskstatus], Text _, Tag "ac:task-body" _ [Text taskbody], Text _] = "\n\n- [" ++ (if trim taskstatus == "complete" then "x" else " ") ++ "]" ++ if not $ null $ trim taskbody then ' ':trim taskbody else "" ++ "\n"
     showElem' pc t as es = traceShowId $ pageName pc ++ ": <" ++ t ++ show as ++ ">" ++ showElemsBlock pc es ++ "</" ++ t ++ ">"
 
 isli :: Elem -> Bool
@@ -503,19 +506,20 @@ isEmpty _ = False
 processMacroParams :: [Elem] -> ([(String, String)], [Elem])
 processMacroParams es = let (ps, es') = processMacroParams' es in (sort ps, es')
   where
-    processMacroParams' (Tag "ac:parameter" [Attr "ac:name" n] [Text v]:es'') = let (ps, es''') = processMacroParams' es'' in filterParams n v ps es'''
+    processMacroParams' (Tag "ac:parameter" [Attr "ac:name" _] []:es'') = processMacroParams' es''
+    processMacroParams' (Tag "ac:parameter" [Attr "ac:name" n] [Text v]:es'') = let (ps, es''') = processMacroParams' es'' in (filterParams n v ps, es''')
     processMacroParams' (e:es'') = let (ps, es''') = processMacroParams' es'' in (ps, e:es''')
     processMacroParams' [] = ([], [])
-    filterParams "atlassian-macro-output-type" "BLOCK" ps restes = (ps, restes)
-    filterParams "atlassian-macro-output-type" "INLINE" ps restes = (ps, restes)
-    filterParams "enableHeadingAttributes" "false" ps restes = (ps, restes)
-    filterParams "enableHighlighting" "false" ps restes = (ps, restes)
-    filterParams "enableSorting" "false" ps restes = (ps, restes)
-    filterParams "multiple" "false" ps restes = (ps, restes)
-    filterParams "heading" "0" ps restes = (ps, restes)
-    filterParams "all" "true" ps restes = (ps, restes)
-    filterParams "highlightColor" "@default" ps restes = (ps, restes)
-    filterParams n v ps restes = ((n, v) : ps, restes)
+    filterParams "atlassian-macro-output-type" "BLOCK" ps = ps
+    filterParams "atlassian-macro-output-type" "INLINE" ps = ps
+    filterParams "enableHeadingAttributes" "false" ps = ps
+    filterParams "enableHighlighting" "false" ps = ps
+    filterParams "enableSorting" "false" ps = ps
+    filterParams "multiple" "false" ps = ps
+    filterParams "heading" "0" ps = ps
+    filterParams "all" "true" ps = ps
+    filterParams "highlightColor" "@default" ps = ps
+    filterParams n v ps = (n, v) : ps
 
 allclasses :: String -> String
 allclasses = unwords . map ('.':) . words
@@ -549,7 +553,7 @@ processMacro pc "mgnl-app-lauchner" es = let (pss, es') = processMacroParams es 
                                          in  "(mgnl-app-launcher: " ++ showElems pc es' ++ show pss ++ ")"
 
 processMacro pc "localtab" es = processMacro pc "localtabgroup" [Tag "ac:structured-macro" [Attr "ac:name" "localtab"] (Tag "ac:parameter" [Attr "ac:name" "active"] [Text "true"]:es)] -- put isolated localtab into its own tabgroup
-processMacro pc "localtabgroup" es = "\n::: tabset\n\n" ++ showTabGroup (processTabGroupMacro es) ++ "\n:::\n"
+processMacro pc "localtabgroup" es = "\n\n::: tabset\n\n" ++ showTabGroup (processTabGroupMacro es) ++ "\n:::\n"
   where
     processTabGroupMacro [] = []
     processTabGroupMacro (Tag "p" [Attr "class" "auto-cursor-target"] [Tag "br" [] []]:rest) = processTabGroupMacro rest
@@ -559,12 +563,12 @@ processMacro pc "localtabgroup" es = "\n::: tabset\n\n" ++ showTabGroup (process
                                                                                                   checked = ("active", "true") `elem` pss
                                                                                               in  (title, showElems pc es'', checked):processTabGroupMacro rest
     processTabGroupMacro es' = trace ("WARNING: " ++ pageName pc ++ ": unknown structure for processTabGroupMacro: " ++ show es') []
-    showTabGroup ts = concatMap showRadio ts ++ "\n::: tab-panels\n\n" ++ concatMap showTab ts ++ "\n\n:::\n\n"
+    showTabGroup ts = concatMap showRadio ts ++ "\n\n::: tab-panels\n\n" ++ concatMap showTab ts ++ "\n\n:::\n\n"
     showRadio (title, _, checked) = let title' = idEncode title ++ tabsetId'
                                         checked' = if checked then " checked" else ""
                                     in  "<input type=\"radio\" name=\"tabset" ++ tabsetId' ++ "\" id=\"" ++ title' ++ "-button\"" ++ checked'
                                         ++ "><label for=\"" ++ title' ++ "-button\">" ++ title ++ "</label>\n"
-    showTab (title, tabtext, _) = "\n::: {.tab-panel #" ++ idEncode title ++ tabsetId' ++ "}\n\n" ++ tabtext ++ "\n\n:::\n\n"
+    showTab (title, tabtext, _) = "\n\n::: {.tab-panel #" ++ idEncode title ++ tabsetId' ++ "}\n\n" ++ tabtext ++ "\n\n:::\n\n"
     idEncode "" = ""
     idEncode (c:s) | isAlphaNum c = c:idEncode s
     idEncode (_:s) = idEncode s
@@ -601,9 +605,9 @@ processMacro pc "noformat" es = showCodeMacro pc False Nothing [] [] Nothing es
 processMacro pc "mgnl-mini-code-snippet" es = showCodeMacro pc False Nothing [] [] Nothing es
 processMacro pc "details" es = showElems pc es
 processMacro pc "excerpt" es = let (_, es') = processMacroParams es
-                               in  "\n::: excerpt\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
+                               in  "\n\n::: excerpt\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
 processMacro pc "excerpt-include" es = let (_, es') = processMacroParams es
-                                           pan = id -- if lookup "nopanel" pss == Just "true" then id else \x -> "\n::: excerpt-panel\n  " ++ x ++ "\n:::\n"
+                                           pan = id -- if lookup "nopanel" pss == Just "true" then id else \x -> "\n\n::: excerpt-panel\n  " ++ x ++ "\n:::\n"
                                            link = case es' of
                                                    [Tag "ac:parameter" [Attr "ac:name" ""] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []]]] -> findLink pc l
                                                    [Tag "ac:parameter" [Attr "ac:name" ""] [Tag "ac:link" [] [Tag "ri:page" [Attr "ri:space-key" s, Attr "ri:content-title" l] []]]] -> externWikiLink pc s l
@@ -613,9 +617,9 @@ processMacro pc "multiexcerpt" es = let (pss, es') = processMacroParams es
                                         name = case lookup "MultiExcerptName" pss of
                                                  Just name' -> "{.excerpt #" ++ toIdent name' ++ "}"
                                                  Nothing    -> "excerpt"
-                                    in  "\n::: " ++ name ++ "\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
+                                    in  "\n\n::: " ++ name ++ "\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
 processMacro pc "multiexcerpt-include" es = let (pss, es') = processMacroParams es
-                                                pan = id -- if lookup "nopanel" pss == Just "true" then id else \x -> "\n::: excerpt-panel\n  " ++ x ++ "\n:::\n"
+                                                pan = id -- if lookup "nopanel" pss == Just "true" then id else \x -> "\n\n::: excerpt-panel\n  " ++ x ++ "\n:::\n"
                                                 name = case lookup "MultiExcerptName" pss of
                                                          Just name' -> '#':toIdent name'
                                                          Nothing -> ""
@@ -642,10 +646,10 @@ processMacro pc "html-wrap" es = let (ps, es') = processMacroParams es
                                      (ps', _) = processMacroParamsS' es
                                      myclass = lookup "class" ps
                                  in case myclass of
-                                      Just "menu" -> "\n::: infobox\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
+                                      Just "menu" -> "\n\n::: infobox\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
                                       Just "thumbnail" -> showElems pc es'
-                                      Just myclass' -> trace ("WARNING:" ++ pageName pc ++ ": other class: " ++ myclass') $ "\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
-                                      Nothing -> "\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
+                                      Just myclass' -> trace ("WARNING:" ++ pageName pc ++ ": other class: " ++ myclass') $ "\n\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
+                                      Nothing -> "\n\n::: {" ++ ps' ++ "}\n" ++ (trimlines $ showElems pc es') ++ ":::\n"
   where
     processMacroParamsS' es' = let (ps, es'') = processMacroParams es' in (unwords $ mapMaybe processMacroParamS ps, es'')
     processMacroParamS ("class", v) = Just $ allclasses v
@@ -660,15 +664,17 @@ processMacro pc "note" es = mkBoxDiv pc "note" es
 processMacro pc "tip" es = mkBoxDiv pc "tip" es
 processMacro pc "warning" es = mkBoxDiv pc "warning" es
 processMacro pc "list-items-wrapper-macro" es = showElems pc es
-processMacro pc "status" es = let (_, es') = processMacroParams es -- FIXME: take params into account
-                              in  showElemsBrackets' pc es' $ "{.status}"
+processMacro pc "status" es = let (ps, es') = processMacroParams es
+                                  color = maybe "" ((" ."++) . map toLower) $ lookup "colour" ps
+                                  title = lookupWithDefault "" "title" ps
+                              in  "[" ++ title ++ "]{.status" ++ color ++ "}" ++ (trimlines $ showElems pc es')
 processMacro pc "table-plus" es = let (pss, es') = processMacroParams es
                                       ps = unwords $ "table" : (mapMaybe filterAttrs pss)
                                       filterAttrs ("columnAttributes", _) = Nothing
                                       filterAttrs (n, v) = Just $ n ++ "=\"" ++ v ++ "\""
                                       output [] = ""
                                       output (e1@(Tag t _ _):restes) | t /= "table" = showElems pc [e1] ++ output restes
-                                      output [Tag "table" _ myes] = "\n<" ++ ps ++ ">\n" ++ showIndentTrimTable pc myes ++ "</table>\n"
+                                      output [Tag "table" _ myes] = "\n\n<" ++ ps ++ ">\n" ++ showIndentTrimTable pc myes ++ "</table>\n"
                                       output (t1@(Tag "table" _ _):e2:restes) = output [t1] ++ output (e2:restes)
                                       output myes = error $ "Unhandled table-plus macro\n!!!table\n{" ++ ps ++ "}\n" ++ showElems pc myes ++ "!!!end table\n"
                                   in output es'
@@ -696,7 +702,7 @@ processMacro _  "contentbylabel" es = let (ps, _) = processMacroParams es
     getLabels' acc (c:s) = getLabels' (acc ++ [c]) s
     getLabels' _ "" = []
 -- processMacro _ _ _ = "" -- unknown macro, ignore for demo purposes
-processMacro pc name es = let (ps, es') = processMacroParamsS es in trace ("\n" ++ pageName pc ++ ": !" ++ name ++ ps ++ show es') (if null es' then "" else showElemsBlock pc es')
+processMacro pc name es = let (ps, es') = processMacroParamsS es in trace ("\n\n" ++ pageName pc ++ ": !" ++ name ++ ps ++ show es') (if null es' then "" else showElemsBlock pc es')
   where
     processMacroParamsS es' = let (ps, es'') = processMacroParams es' in (concatMap processMacroParamS ps, es'')
     processMacroParamS (n, v) = "(" ++ n ++ "=\"" ++ v ++ "\")"
@@ -704,7 +710,7 @@ processMacro pc name es = let (ps, es') = processMacroParamsS es in trace ("\n" 
 mkBoxDiv :: ParseContext -> String -> [Elem] -> String
 mkBoxDiv pc boxtype es = let (pss, es') = processMacroParams es
                              title = maybe "" (\t -> "  **" ++ t ++ "**\n\n") $ lookup "title" pss
-                         in  "\n::: " ++ boxtype ++ "\n" ++ title ++ showIndentTrim pc es' ++ ":::\n"
+                         in  "\n\n::: " ++ boxtype ++ "\n" ++ title ++ showIndentTrim pc es' ++ ":::\n"
 
 chooseLang :: String -> String -- translate language string to class attribute
 chooseLang "html/xml" = ".xml"
@@ -713,6 +719,7 @@ chooseLang s = '.':s
 showCodeMacro :: ParseContext -> Bool -> Maybe String -> [String] -> [String] -> Maybe String -> [Elem] -> String
 showCodeMacro pc _        title attrs sections url (Tag "ac:parameter" [Attr "ac:name" ""] [Text t]:es) = showCodeMacro pc True title (chooseLang t:attrs) sections url es
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "language"] [Text "text"]:es) = showCodeMacro pc haveLang title attrs sections url es
+showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "language"] [Text "xml"]:es) = showCodeMacro pc haveLang title attrs sections url es -- don't trust it, it could be cnd and we can detect xml anyway
 showCodeMacro pc _        title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "language"] [Text t]:es) = showCodeMacro pc True title (chooseLang t:attrs) sections url es
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "firstline"] [Text "1"]:es) = showCodeMacro pc haveLang title attrs sections url es
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "firstline"] [Text t]:es) = showCodeMacro pc haveLang title (("startFrom=\"" ++ t ++ "\""):attrs) sections url es
@@ -729,16 +736,16 @@ showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "password"] [Text _]:es) = showCodeMacro pc haveLang title attrs sections url es -- ignore
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" "collapseType"] [Text _]:es) = showCodeMacro pc haveLang title attrs sections url es -- ignore
 showCodeMacro pc haveLang title attrs sections url (Tag "ac:parameter" [Attr "ac:name" n] [Text v]:es) = trace ("WARNING: " ++ pageName pc ++ ": Unknown attribute in code macro: " ++ n ++ " = " ++ v) $ showCodeMacro pc haveLang title attrs sections url es
-showCodeMacro pc haveLang title attrs sections url es = "\n" ++ (withTitle title $ case url of
-                                                                                     Nothing   -> "```" ++ t ++ "\n" ++ s ++ "\n```\n"
-                                                                                     Just url' -> "[" ++ uriDecode url' ++ "](!include-raw" ++ sections' ++ ")" ++ t)
+showCodeMacro pc haveLang title attrs sections url es = "\n\n" ++ (withTitle title $ case url of
+                                                                                       Nothing   -> "```" ++ t ++ "\n" ++ s ++ "\n```\n"
+                                                                                       Just url' -> "[" ++ uriDecode url' ++ "](!include-raw" ++ sections' ++ ")" ++ t)
   where
     s = showElems pc { inCode = True } es
     sections' = concatMap (\sec -> " \"" ++ uriDecode sec ++ "\"") sections
     t = if null a then "" else "{" ++ unwords a ++ "}"
     a = reverse $ if haveLang then attrs else
           case dropWhile isSpace s of
-            '<':_ -> ".xml":attrs
+            '<':s' -> (if ((<) <$> findIndex (=='=') s' <*> findIndex (=='>') s') == Just True then ".cnd" else ".xml"):attrs
             '-':_ -> ".yaml":attrs
             _     -> attrs
     withTitle Nothing c = "::: codebox\n\n" ++ (indent $ trimlines $ c) ++ ":::\n"
@@ -900,7 +907,7 @@ getHeaders s = case parse confluence "" s of
     showElemFlat (Tag _ _ es) = concatMap showElemFlat es
     showElemFlat (Text t) = t
 
-confluenceToPandoc :: String -> String -> M.Map (String, String) String -> M.Map String String -> [String] -> String -> String
-confluenceToPandoc spacekey title pm am keys s = case parse confluence "" s of
+confluenceToPandoc :: String -> String -> M.Map (String, String) String -> M.Map (String, String) String -> M.Map String String -> [String] -> String -> String
+confluenceToPandoc spacekey title pm pmci am keys s = case parse confluence "" s of
   Left e   -> "Error: " ++ show e ++ "\n" ++ s
-  Right s' -> sanitize (showElems (PC spacekey title pm am keys False False False False False False False False '\n' 0) s') ++ "\n\n\n<!-- Original Confluence content:\n\n" ++ s ++ "\n\n-->\n"
+  Right s' -> sanitize (showElems (PC spacekey title pm pmci am keys False False False False False False False False '\n' 0) s') ++ "\n\n\n<!-- Original Confluence content:\n\n" ++ s ++ "\n\n-->\n"
