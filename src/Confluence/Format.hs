@@ -48,9 +48,14 @@ data ParseContext = PC { spaceKey :: String
                        , inTable :: Bool
                        , inSimpleTable :: Bool
                        , inTableBody :: Bool
+                       , seenH1 :: Bool
                        , prevChar :: Char
                        , tabsetId :: Int
                        } deriving (Show, Eq, Ord)
+
+getTag :: Elem -> String
+getTag (Tag t _ _) = t
+getTag _ = ""
 
 safeLast :: Char -> String -> Char
 safeLast d [] = d
@@ -79,13 +84,13 @@ confToStandardEmoticon s = case s of
 
 showElems :: ParseContext -> [Elem] -> String
 showElems _ [] = ""
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-f":_) _:e:es) = "[" ++ showElem pc e ++ "]{.f}" ++ showElems pc { prevChar = '}', tabsetId = 1 + tabsetId pc } es
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-l":_) _:e:es) = "[" ++ showElem pc e ++ "]{.l}" ++ showElems pc { prevChar = '}', tabsetId = 1 + tabsetId pc } es
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-n":_) _:e:es) = "[" ++ showElem pc e ++ "]{.n}" ++ showElems pc { prevChar = '}', tabsetId = 1 + tabsetId pc } es
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-p":_) _:e:es) = "[" ++ showElem pc e ++ "]{.p}" ++ showElems pc { prevChar = '}', tabsetId = 1 + tabsetId pc } es
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-wp":_) _:e:es) = "[" ++ showElem pc e ++ "]{.wp}" ++ showElems pc { prevChar = '}', tabsetId = 1 + tabsetId pc } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-f":_) _:e:es) = "[" ++ showElem pc e ++ "]{.f}" ++ showElems pc { prevChar = '}' } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-l":_) _:e:es) = "[" ++ showElem pc e ++ "]{.l}" ++ showElems pc { prevChar = '}' } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-n":_) _:e:es) = "[" ++ showElem pc e ++ "]{.n}" ++ showElems pc { prevChar = '}' } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-p":_) _:e:es) = "[" ++ showElem pc e ++ "]{.p}" ++ showElems pc { prevChar = '}' } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-wp":_) _:e:es) = "[" ++ showElem pc e ++ "]{.wp}" ++ showElems pc { prevChar = '}' } es
 showElems pc (e:es) = let s = showElem pc e
-                      in  s ++ showElems pc { prevChar = safeLast '\n' s, tabsetId = 1 + tabsetId pc } es
+                      in  s ++ showElems pc { prevChar = safeLast '\n' s, tabsetId = 1 + tabsetId pc, seenH1 = seenH1 pc || getTag e == "h1" } es
 
 showElemsBrackets :: ParseContext -> [Elem] -> String -> String
 showElemsBrackets pc es ss = let es' = if inCode pc then [Tag "code" [] es] else es
@@ -199,6 +204,7 @@ findLink' :: ParseContext -> [String] -> String -> [Char]
 -- findLink' pc keys ('_':l) = findLink' pc keys ('I':l)
 findLink' pc keys l = case findBest (keys ++ (spacekeys pc \\ keys)) l (pagemap pc) (pagemapci pc) of
   Just ('/':'_':'I':'n':'c':'l':'u':'s':'i':'o':'n':'s':' ':'l':'i':'b':'r':'a':'r':'y':'/':l') -> "/_i/" ++ uriEncode l'
+  Just ('/':'M':'a':'g':'n':'o':'l':'i':'a':_:_:'.':_:_:'d':'o':'c':'u':'m':'e':'n':'t':'a':'t':'i':'o':'n':'/':l') -> '/' : uriEncode l'
   Just l' -> uriEncode l'
   Nothing -> '/':uriEncode l
 
@@ -299,13 +305,15 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     removeSomeStyle ((Attr "style" ""):as) = removeSomeStyle as
     removeSomeStyle (a@(Attr "style" s):as) = case parse style "" s of
                                             Left _   -> a:removeSomeStyle as
-                                            Right ss -> case removeStyleElems ss of
-                                              [] -> removeSomeStyle as
-                                              s' -> (Attr "style" $ showStyle s'):removeSomeStyle as
+                                            Right ss -> let (s', c') = removeStyleElems ss
+                                                        in  (if null s' then id else ((Attr "style" $ showStyle s'):))
+                                                            . (if c' == 0 then id else ((Attr "class" $ "lv" ++ show c'):))
+                                                            $ removeSomeStyle as
     removeSomeStyle (a:as) = a:removeSomeStyle as
-    removeStyleElems :: Style -> Style
-    removeStyleElems [] = []
-    removeStyleElems (s@(StyleElem { styleName="color", styleValue=(RGB r g b) }):ss) = if all (<100) [r,g,b] then removeStyleElems ss else s:removeStyleElems ss
+    removeStyleElems :: Style -> (Style, Int)
+    removeStyleElems [] = ([], 0)
+    removeStyleElems (s@(StyleElem { styleName="color", styleValue=(RGB r g b) }):ss) = let (s', c') = removeStyleElems ss
+                                                                                        in  if all (<100) [r,g,b] then (s', c') else (s:s', c')
     removeStyleElems (StyleElem { styleName="letter-spacing" }:ss) = removeStyleElems ss
     -- removeStyleElems (StyleElem { styleName="text-align", styleValue=Value "left" }:ss) = removeStyleElems ss
     removeStyleElems (StyleElem { styleName="text-align" }:ss) = removeStyleElems ss
@@ -318,8 +326,18 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     removeStyleElems (StyleElem { styleName="line-height" }:ss) = removeStyleElems ss
     removeStyleElems (StyleElem { styleName="background-color", styleValue=Value "transparent" }:ss) = removeStyleElems ss
     removeStyleElems (StyleElem { styleName="background-image", styleValue=Value "none" }:ss) = removeStyleElems ss
-    removeStyleElems (StyleElem { styleName="margin-left", styleValue=Value v }:ss) = StyleElem "margin-left" (Value $ removeDotZero v) : removeStyleElems ss
-    removeStyleElems (s:ss) = s:removeStyleElems ss
+    removeStyleElems (StyleElem { styleName="margin-left", styleValue=Value v }:ss) =
+      let (s', c') = removeStyleElems ss
+      in  case removeDotZero v of
+            "30px"  -> (s', 1 + c')
+            "60px"  -> (s', 2 + c')
+            "90px"  -> (s', 3 + c')
+            "120px" -> (s', 4 + c')
+            "150px" -> (s', 5 + c')
+            "180px" -> (s', 6 + c')
+            "210px" -> (s', 7 + c')
+            v'      -> (StyleElem "margin-left" (Value v'):s', c')
+    removeStyleElems (s:ss) = let (s', c') = removeStyleElems ss in (s:s', c')
     removeDotZero ".0px" = "px"
     removeDotZero ".00px" = "px"
     removeDotZero ".000px" = "px"
@@ -334,6 +352,9 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     splitTableHeader (Tag "tbody" _ es:es') = splitTableHeader (es ++ es')
     splitTableHeader (Tag "colgroup" _ _:es) = splitTableHeader es
     splitTableHeader b@(Tag "tr" _ (Tag "td" _ _:_):_) = ([], b)
+    splitTableHeader b@(Tag "tr" _ (_:Tag "td" _ _:_):_) = ([], b)
+    splitTableHeader b@(Tag "tr" _ (_:_:Tag "td" _ _:_):_) = ([], b)
+    splitTableHeader b@(Tag "tr" _ (_:_:_:Tag "td" _ _:_):_) = ([], b)
     splitTableHeader (e:es) = let (h, b) = splitTableHeader es in (e:h, b)
     splitTableHeader [] = ([], [])
 
@@ -356,9 +377,10 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
 
     showElem' pc "p" [] es = ('\n':) $ trimlines $ showElemsBlock pc es
     showElem' pc "p" [Attr "style" s] es = "\n\n" ++ (showElemsBrackets' pc es $ "{style=\"" ++ s ++ "\"}") ++ "\n"
+--     showElem' pc "p" (Attr "class" ('l':'v':c:[]):as) es = "\n\n[" ++ ((trim $ showElems' pc "p" as es) $ "]{.lv" ++ (c:"}")) ++ "\n"
     showElem' pc "p" as es = case lookup "class" (map (\(Attr n v) -> (n, v)) as) of
       Just ('e':'m':'o':'t':'i':'c':'o':'n':' ':'e':'m':'o':'t':'i':'c':'o':'n':'-':s) -> "\n\n" ++ confToStandardEmoticon s ++ " " ++ showElems pc es ++ "\n"
-      Just _ -> ('\n':) $ trimlines $ showElemsBlock pc es
+      Just c -> "\n\n" ++ (showElemsBrackets' pc es $ "{." ++ c ++ "}") ++ "\n"
       _ -> traceShow ("ERROR"::String, pageName pc, as, es) ""
     showElem' pc "span" [] es = showElems pc es
     showElem' pc "span" [Attr "title" ""] es = showElems pc es
@@ -382,9 +404,11 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "tr" [] es = "<tr>\n" ++ showIndentTrimTable pc es ++ "</tr>\n"
     showElem' pc "tr" [Attr "style" _] _ | inSimpleTable pc = "\0" -- FIXME: maybe try to pass through left-margins instead
     showElem' pc "tr" [Attr "style" s] es = "<tr style=\"" ++ s ++ "\">\n" ++ showIndentTrimTable pc es ++ "</tr>\n"
+    showElem' pc "tr" [Attr "class" _] es = "<tr>\n" ++ showIndentTrimTable pc es ++ "</tr>\n"
     showElem' pc "td" [Attr "colspan" _] _ | inSimpleTable pc = "\0"
     showElem' pc "td" [Attr "rowspan" _] _ | inSimpleTable pc = "\0"
-    showElem' pc "td" _ es | inSimpleTable pc = "|" ++ (trim $ trimlines $ showElems pc es) -- FIXME: make sure left-margin styles on TRs and TDs are supported by simple tables
+    showElem' pc "td" _ es | inSimpleTable pc = "|" ++ (trim $ trimlines $ showElems pc es)
+    showElem' pc "td" (Attr "class" _:as) es = showElem' pc "td" as es
     showElem' pc "td" [] es = "<td>\n" ++ showIndentTrimTable pc es ++ "</td>\n"
     showElem' pc "td" [Attr "colspan" cs] es = "<td colspan=\"" ++ cs ++ "\">\n" ++ showIndentTrimTable pc es ++ "</td>\n"
     showElem' pc "td" [Attr "colspan" cs, Attr "style" s] es = "<td colspan=\"" ++ cs ++ "\" style=\"" ++ s ++ "\">\n" ++ showIndentTrimTable pc es ++ "</td>\n"
@@ -397,6 +421,7 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "th" [Attr "rowspan" cs] es = "<th rowspan=\"" ++ cs ++ "\">\n" ++ showIndentTrimTable pc es ++ "</th>\n"
     showElem' pc "th" [] es = "<th>\n" ++ showIndentTrimTable pc es ++ "</th>\n"
     showElem' pc "div" [Attr "class" "content-wrapper", Attr "style" s] es = "[" ++ (trim $ trimlines $ showElems pc es) ++ "]{style=\"" ++ s ++ "\"}"
+    showElem' pc "div" [Attr "class" "content-wrapper", Attr "class" c] es = "[" ++ (trim $ trimlines $ showElems pc es) ++ "]{." ++ c ++ "}"
     showElem' pc "div" [Attr "class" "tablesorter-header-inner"] es = (trim $ trimlines $ showElems pc es)
     showElem' pc "div" [Attr "class" "content-wrapper"] es = (trim $ trimlines $ showElems pc es)
     showElem' pc "div" [Attr "class" "layoutArea"] es = showElemsBlock' pc es "::: columns" ":::"
@@ -405,11 +430,16 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "div" [Attr "class" c] es = "\n\n::: " ++ c ++ showElemsBlock pc es ++ ":::\n"
     showElem' pc "div" [] es = showElemsBlock pc es
     showElem' pc "h1" _ es = "\n\n# " ++ showElems pc es ++ "\n"
-    showElem' pc "h2" _ es = "\n\n## " ++ showElems pc es ++ "\n"
-    showElem' pc "h3" _ es = "\n\n### " ++ showElems pc es ++ "\n"
-    showElem' pc "h4" _ es = "\n\n#### " ++ showElems pc es ++ "\n"
-    showElem' pc "h5" _ es = "\n\n##### " ++ showElems pc es ++ "\n"
-    showElem' pc "h6" _ es = "\n\n###### " ++ showElems pc es ++ "\n"
+    showElem' pc "h2" _ es | seenH1 pc = "\n\n## " ++ showElems pc es ++ "\n"
+    showElem' pc "h2" _ es = "\n\n# " ++ showElems pc es ++ "\n"
+    showElem' pc "h3" _ es | seenH1 pc = "\n\n### " ++ showElems pc es ++ "\n"
+    showElem' pc "h3" _ es = "\n\n## " ++ showElems pc es ++ "\n"
+    showElem' pc "h4" _ es | seenH1 pc = "\n\n#### " ++ showElems pc es ++ "\n"
+    showElem' pc "h4" _ es = "\n\n### " ++ showElems pc es ++ "\n"
+    showElem' pc "h5" _ es | seenH1 pc = "\n\n##### " ++ showElems pc es ++ "\n"
+    showElem' pc "h5" _ es = "\n\n#### " ++ showElems pc es ++ "\n"
+    showElem' pc "h6" _ es | seenH1 pc = "\n\n###### " ++ showElems pc es ++ "\n"
+    showElem' pc "h6" _ es = "\n\n##### " ++ showElems pc es ++ "\n"
     showElem' pc "label" [] es = showElems pc es
     showElem' pc "a" [] es = showElems pc es
     showElem' pc "a" [Attr "href" l] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ ")"
@@ -434,13 +464,16 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "ac:link" _ es = showElems pc es -- empty link, ignore
     showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (replaceFileName (findLink pc p) f) ++ ")")
     showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ externWikiLink pc k p ++ "/" ++ f ++ ")")
-    showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ ")")
+    showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline}")
+    showElem' pc "ac:image" [Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ externWikiLink pc k p ++ "/" ++ f ++ "){.inline}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (replaceFileName (findLink pc p) f) ++ "){.inline}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline}")
     showElem' pc "ac:image" [Attr "ac:height" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "height=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:height" val, Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline height=" ++ val ++ "}")
+    showElem' pc "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (externWikiLink pc k p) ++ "/" ++ f ++ "){width=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (replaceFileName (findLink pc p) f) ++ "){width=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "width=" ++ val ++ "}")
+    showElem' pc "ac:image" [Attr "ac:thumbnail" "true", Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (externWikiLink pc k p) ++ "/" ++ f ++ "){.inline width=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true", Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (replaceFileName (findLink pc p) f) ++ "){.inline width=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true", Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline width=" ++ val ++ "}")
     showElem' pc "ac:inline-comment-marker" _ es = showElems pc es
@@ -869,9 +902,11 @@ sanitize = sanitize' . unlines . map removeTrailingSpace . lines . sanitize' . u
     sanitize'' (s:ss) = s:sanitize'' ss
     sanitizeLine = fixWordBreaks . removeDoubleSpaces . removeTrailingSpace
     removeTrailingSpace = reverse . dropWhile isSpace . reverse
-    fixWordBreaks ('`':'`':y:s) | y /= '`' = fixWordBreaks' $ y:s
+    fixWordBreaks "" = ""
     -- fixWordBreaks ('|':s) = fixWordBreaks' $ s
-    fixWordBreaks s = fixWordBreaks' s
+    fixWordBreaks (x:s) | isSpace x = x:fixWordBreaks s
+    fixWordBreaks ('`':'`':y:s) = if y == '`' then '`':'`':'`':fixWordBreaks' s else fixWordBreaks' $ y:s
+    fixWordBreaks (x:s) = x:fixWordBreaks' s
     -- fixWordBreaks' (x:'%':'#':'&':y:s) = fixWordBreaks' $ check x y ++ s
     -- fixWordBreaks' [x,'%','#','&'] = [x]
     -- fixWordBreaks' ('%':'#':'&':y:s) = fixWordBreaks' $ y:s
@@ -882,17 +917,17 @@ sanitize = sanitize' . unlines . map removeTrailingSpace . lines . sanitize' . u
     fixWordBreaks' (d:' ':x:"")  | d `elem` ("`*})" :: [Char]) && x `elem` (".,)" :: [Char]) = d:x:""
     fixWordBreaks' (d:' ':x:y:s) | d `elem` ("`*})" :: [Char]) && x `elem` (".,)" :: [Char]) && not (isAlphaNum y || y `elem` ("`*" :: [Char])) = fixWordBreaks' $ d:x:y:s
     fixWordBreaks' (x:' ':d:s)   | d `elem` ("`*"   :: [Char]) && x `elem` ("("   :: [Char]) = fixWordBreaks' $ x:d:s
-    fixWordBreaks' (x:'`':'`':y:s) | x /= '`' && y /= '`' = fixWordBreaks' $ x:y:s
-    fixWordBreaks' (x:'`':'`':[]) | x /= '`' = fixWordBreaks' $ [x]
+    fixWordBreaks' ('`':'`':s) = fixWordBreaks' s
+    fixWordBreaks' (x:'`':'`':s) = fixWordBreaks' $ x:s
     -- fixWordBreaks (' ':',':s) = fixWordBreaks' $ ',':s
-    fixWordBreaks' (s:ss) = s:fixWordBreaks' ss
+    fixWordBreaks' (x:s) = x:fixWordBreaks' s
     -- check x y = if not (isAlphaNum x) || not (isAlphaNum y) || (x == '*' && y == '`') || (x == '`' && y == '*' ) then x:y:"" else x:' ':y:""
     -- check x y = if or [ isSpace x, isSpace y, y `elem` (",.:)]}/'\"\\" :: String), x `elem` ("([{'\"/\\" :: String), x == '*' && y == '`', x == '`' && y == '*' ] then x:y:"" else x:' ':y:""
     removeDoubleSpaces s = let (s1, s2) = span isSpace s
                            in  s1 ++ removeDoubleSpaces' s2
     removeDoubleSpaces' "" = ""
     removeDoubleSpaces' (x:y:s) | isSpace x && isSpace y = removeDoubleSpaces' $ ' ':s
-    removeDoubleSpaces' (s:ss) = s:removeDoubleSpaces' ss
+    removeDoubleSpaces' (x:s) = x:removeDoubleSpaces' s
 
 getHeaders :: String -> [String]
 getHeaders s = case parse confluence "" s of
@@ -910,4 +945,4 @@ getHeaders s = case parse confluence "" s of
 confluenceToPandoc :: String -> String -> M.Map (String, String) String -> M.Map (String, String) String -> M.Map String String -> [String] -> String -> String
 confluenceToPandoc spacekey title pm pmci am keys s = case parse confluence "" s of
   Left e   -> "Error: " ++ show e ++ "\n" ++ s
-  Right s' -> sanitize (showElems (PC spacekey title pm pmci am keys False False False False False False False False '\n' 0) s') ++ "\n\n\n<!-- Original Confluence content:\n\n" ++ s ++ "\n\n-->\n"
+  Right s' -> sanitize (showElems (PC spacekey title pm pmci am keys False False False False False False False False False '\n' 0) s') ++ "\n\n\n<!-- Original Confluence content:\n\n" ++ s ++ "\n\n-->\n"
