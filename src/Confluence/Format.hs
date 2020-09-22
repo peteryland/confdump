@@ -69,35 +69,36 @@ lookupWithDefault def k kvs = maybe def id $ lookup k kvs
 
 confToStandardEmoticon :: String -> String
 confToStandardEmoticon s = case s of
-  "information" -> ":information_source:" -- ℹ️
-  "thumbs-up" -> ":thumbsup:" -- 👍
-  "red-star" -> ":star:" -- ⭐
-  "tick" -> ":heavy_check_mark:" -- ✔️
-  "cross" -> ":x:" -- ❌ -- alternative would be :heavy_multiplication_x:
-  "minus" -> ":heavy_minus_sign:" -- ➖
-  "plus" -> ":heavy_plus_sign:" -- ➕
-  "warning" -> ":warning:" -- ⚠️
-  "smile" -> ":smile:" -- TODO check these three
-  "light-on" -> ":light-on:"
-  "yellow-star" -> ":yellow-star:"
+  "information" -> "ℹ️"
+  "thumbs-up" -> "👍"
+  "red-star" -> "⭐"
+  "tick" -> "✔️"
+  "cross" -> "❌"
+  "minus" -> "➖"
+  "plus" -> "➕"
+  "warning" -> "⚠️"
+  "smile" -> ":)" -- FIXME
+  "light-on" -> ":light-on:" -- FIXME
+  "yellow-star" -> ":yellow-star:" -- FIXME
   _ -> ":" ++ (trace ("WARNING: Unkown emoticon: " ++ s) s) ++ ":"
 
 showElems :: ParseContext -> [Elem] -> String
 showElems _ [] = ""
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-f":_) _:e:es) = "[" ++ showElem pc e ++ "]{.f}" ++ showElems pc { prevChar = '}' } es
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-l":_) _:e:es) = "[" ++ showElem pc e ++ "]{.l}" ++ showElems pc { prevChar = '}' } es
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-n":_) _:e:es) = "[" ++ showElem pc e ++ "]{.n}" ++ showElems pc { prevChar = '}' } es
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-p":_) _:e:es) = "[" ++ showElem pc e ++ "]{.p}" ++ showElems pc { prevChar = '}' } es
-showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-wp":_) _:e:es) = "[" ++ showElem pc e ++ "]{.wp}" ++ showElems pc { prevChar = '}' } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-f":_) _:e:es) = "[.f]#" ++ showElem pc e ++ "#" ++ showElems pc { prevChar = '#' } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-l":_) _:e:es) = "[.l]#" ++ showElem pc e ++ "#" ++ showElems pc { prevChar = '#' } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-n":_) _:e:es) = "[.n]#" ++ showElem pc e ++ "#" ++ showElems pc { prevChar = '#' } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-p":_) _:e:es) = "[.p]#" ++ showElem pc e ++ "#" ++ showElems pc { prevChar = '#' } es
+showElems pc (Tag "ac:structured-macro" (Attr "ac:name" "mgnl-wp":_) _:e:es) = "[.wp]#" ++ showElem pc e ++ "#" ++ showElems pc { prevChar = '#' } es
 showElems pc (e:es) = let s = showElem pc e
                       in  s ++ showElems pc { prevChar = safeLast '\n' s, tabsetId = 1 + tabsetId pc, seenH1 = seenH1 pc || getTag e == "h1" } es
 
 showElemsBrackets :: ParseContext -> [Elem] -> String -> String
 showElemsBrackets pc es ss = let es' = if inCode pc then [Tag "code" [] es] else es
                                  s = showElems pc { prevChar = '\n', inCode = False } es'
+                                 s' = trim $ if null s then "" else "#" ++ s ++ "#"
                              in  (if " " `isPrefixOf` s then " " else "") ++
                                  (if inCode pc then "`" else "") ++
-                                 "[" ++ trim s ++ "]" ++ ss ++
+                                 (if null ss then trim s else ss ++ s') ++
                                  (if " " `isSuffixOf` s then " " else "") ++
                                  (if inCode pc then "`" else "")
 
@@ -127,8 +128,9 @@ indentWith s = unlines . map' (s ++) . lines
     map' f (x:xs) = (if isCodeOrDiv x then x else if isList x then x else f x) : (if isCodeOrDiv x then map'' else map') f xs
     map'' _ [] = []
     map'' f (x:xs) = x : (if isCodeOrDiv x then map' else map'') f xs
-    isCodeOrDiv s' = "```" `isInfixOf` s' || ":::" `isInfixOf` s'
+    isCodeOrDiv s' = "--" `isInfixOf` s' || "----" `isInfixOf` s'
     isList ('*':' ':_) = True
+    isList ('.':' ':_) = True
     isList _           = False
 
 indentWith' :: String -> String -> String
@@ -376,23 +378,23 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
       -- (False, Just s') -> "::: " ++ s' ++ "\n  ||||||\n  |-|-|-|-|-|\n" ++ indent t ++ "\n:::\n"
 
     showElem' pc "p" [] es = ('\n':) $ trimlines $ showElemsBlock pc es
-    showElem' pc "p" [Attr "style" s] es = "\n\n" ++ (showElemsBrackets' pc es $ "{style=\"" ++ s ++ "\"}") ++ "\n"
+    showElem' pc "p" [Attr "style" s] es = "\n\n" ++ (showElemsBrackets' pc es $ "[style=\"" ++ s ++ "\"]") ++ "\n"
 --     showElem' pc "p" (Attr "class" ('l':'v':c:[]):as) es = "\n\n[" ++ ((trim $ showElems' pc "p" as es) $ "]{.lv" ++ (c:"}")) ++ "\n"
     showElem' pc "p" as es = case lookup "class" (map (\(Attr n v) -> (n, v)) as) of
       Just ('e':'m':'o':'t':'i':'c':'o':'n':' ':'e':'m':'o':'t':'i':'c':'o':'n':'-':s) -> "\n\n" ++ confToStandardEmoticon s ++ " " ++ showElems pc es ++ "\n"
-      Just c -> "\n\n" ++ (showElemsBrackets' pc es $ "{." ++ c ++ "}") ++ "\n"
+      Just c -> "\n\n" ++ (showElemsBrackets' pc es $ "[." ++ c ++ "]") ++ "\n"
       _ -> traceShow ("ERROR"::String, pageName pc, as, es) ""
     showElem' pc "span" [] es = showElems pc es
     showElem' pc "span" [Attr "title" ""] es = showElems pc es
-    showElem' pc "span" [Attr "style" s] es = showElemsBrackets' pc es $ "{style=\"" ++ s ++ "\"}"
+    showElem' pc "span" [Attr "style" s] es = showElemsBrackets' pc es $ "[style=\"" ++ s ++ "\"]"
     showElem' pc "span" as es = case lookup "class" (map (\(Attr n v) -> (n, v)) as) of
       Just ('e':'m':'o':'t':'i':'c':'o':'n':' ':'e':'m':'o':'t':'i':'c':'o':'n':'-':s) -> confToStandardEmoticon s ++ showElems pc es
-      Just s -> showElemsBrackets pc es $ "{." ++ s ++ "}"
+      Just s -> showElemsBrackets pc es $ "[." ++ s ++ "]"
       _ -> traceShow ("ERROR"::String, pageName pc, as, es) ""
-    showElem' _  "hr" [] [] = "---\n"
+    showElem' _  "hr" [] [] = "'''\n"
     showElem' pc "br" _ [] | inSimpleTable pc = ""
     showElem' pc "br" _ [] | inLink pc = ""
-    showElem' _  "br" _ [] = "\\\n"
+    showElem' _  "br" _ [] = " +\n"
     showElem' pc "table" _ es = tryTable pc es
     -- showElem' pc "table" (Attr "class" s:_) es = tryTable pc es (Just s)
     -- showElem' pc "table" [] es = tryTable pc es Nothing
@@ -420,39 +422,40 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "th" [Attr "colspan" cs] es = "<th colspan=\"" ++ cs ++ "\">\n" ++ showIndentTrimTable pc es ++ "</th>\n"
     showElem' pc "th" [Attr "rowspan" cs] es = "<th rowspan=\"" ++ cs ++ "\">\n" ++ showIndentTrimTable pc es ++ "</th>\n"
     showElem' pc "th" [] es = "<th>\n" ++ showIndentTrimTable pc es ++ "</th>\n"
-    showElem' pc "div" [Attr "class" "content-wrapper", Attr "style" s] es = "[" ++ (trim $ trimlines $ showElems pc es) ++ "]{style=\"" ++ s ++ "\"}"
-    showElem' pc "div" [Attr "class" "content-wrapper", Attr "class" c] es = "[" ++ (trim $ trimlines $ showElems pc es) ++ "]{." ++ c ++ "}"
+    showElem' pc "div" [Attr "class" "content-wrapper", Attr "style" s] es = "[style=\"" ++ s ++ "\"]#" ++ (trim $ trimlines $ showElems pc es) ++ "#"
+    showElem' pc "div" [Attr "class" "content-wrapper", Attr "class" c] es = "[." ++ c ++ "]#" ++ (trim $ trimlines $ showElems pc es) ++ "#"
     showElem' pc "div" [Attr "class" "tablesorter-header-inner"] es = (trim $ trimlines $ showElems pc es)
     showElem' pc "div" [Attr "class" "content-wrapper"] es = (trim $ trimlines $ showElems pc es)
-    showElem' pc "div" [Attr "class" "layoutArea"] es = showElemsBlock' pc es "::: columns" ":::"
-    showElem' pc "div" [Attr "class" "column"] es = showElemsBlock' pc es "::: column" ":::"
+    showElem' pc "div" [Attr "class" "layoutArea"] es = showElemsBlock' pc es "[.columns]\n--" "--"
+    showElem' pc "div" [Attr "class" "column"] es = showElemsBlock' pc es "[.column]\n--" "--"
     -- showElem' pc "div" [] es = "\n\n::: {}\n" ++ showIndentTrim pc es ++ ":::\n"
-    showElem' pc "div" [Attr "class" c] es = "\n\n::: " ++ c ++ showElemsBlock pc es ++ ":::\n"
+    showElem' pc "div" [Attr "class" c] es = "\n\n[." ++ c ++ "]\n--" ++ showElemsBlock pc es ++ "--\n"
     showElem' pc "div" [] es = showElemsBlock pc es
-    showElem' pc "h1" _ es = "\n\n# " ++ showElems pc es ++ "\n"
-    showElem' pc "h2" _ es | seenH1 pc = "\n\n## " ++ showElems pc es ++ "\n"
-    showElem' pc "h2" _ es = "\n\n# " ++ showElems pc es ++ "\n"
-    showElem' pc "h3" _ es | seenH1 pc = "\n\n### " ++ showElems pc es ++ "\n"
-    showElem' pc "h3" _ es = "\n\n## " ++ showElems pc es ++ "\n"
-    showElem' pc "h4" _ es | seenH1 pc = "\n\n#### " ++ showElems pc es ++ "\n"
-    showElem' pc "h4" _ es = "\n\n### " ++ showElems pc es ++ "\n"
-    showElem' pc "h5" _ es | seenH1 pc = "\n\n##### " ++ showElems pc es ++ "\n"
-    showElem' pc "h5" _ es = "\n\n#### " ++ showElems pc es ++ "\n"
-    showElem' pc "h6" _ es | seenH1 pc = "\n\n###### " ++ showElems pc es ++ "\n"
-    showElem' pc "h6" _ es = "\n\n##### " ++ showElems pc es ++ "\n"
+    showElem' pc "h1" _ es = "\n\n= " ++ showElems pc es ++ "\n"
+    showElem' pc "h2" _ es | seenH1 pc = "\n\n== " ++ showElems pc es ++ "\n"
+    showElem' pc "h2" _ es = "\n\n= " ++ showElems pc es ++ "\n"
+    showElem' pc "h3" _ es | seenH1 pc = "\n\n=== " ++ showElems pc es ++ "\n"
+    showElem' pc "h3" _ es = "\n\n== " ++ showElems pc es ++ "\n"
+    showElem' pc "h4" _ es | seenH1 pc = "\n\n==== " ++ showElems pc es ++ "\n"
+    showElem' pc "h4" _ es = "\n\n=== " ++ showElems pc es ++ "\n"
+    showElem' pc "h5" _ es | seenH1 pc = "\n\n===== " ++ showElems pc es ++ "\n"
+    showElem' pc "h5" _ es = "\n\n==== " ++ showElems pc es ++ "\n"
+    showElem' pc "h6" _ es | seenH1 pc = "\n\n====== " ++ showElems pc es ++ "\n"
+    showElem' pc "h6" _ es = "\n\n===== " ++ showElems pc es ++ "\n"
     showElem' pc "label" [] es = showElems pc es
     showElem' pc "a" [] es = showElems pc es
-    showElem' pc "a" [Attr "href" l] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ ")"
-    showElem' pc "a" [Attr "class" c, Attr "href" l, Attr "title" t] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){" ++ allclasses c ++ " title=\"" ++ t ++ "\"}"
-    showElem' pc "a" [Attr "href" l, Attr "title" t] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){title=\"" ++ t ++ "\"}"
-    showElem' pc "a" [Attr "href" l, Attr "style" s] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){style=\"" ++ s ++ "\"}"
+    showElem' pc "a" [Attr "href" l] es = "link:" ++ findLink pc l ++ "[" ++ showElemsBrackets pc { inLink = True } es "" ++ "]"
+    showElem' pc "a" [Attr "class" c, Attr "href" l, Attr "title" t] es = "link:" ++ findLink pc l ++ "[" ++ showElemsBrackets pc { inLink = True } es "" ++ "," ++ allclasses c ++ " title=\"" ++ t ++ "\"]"
+    showElem' pc "a" [Attr "href" l, Attr "title" t] es = "link:" ++ findLink pc l ++ "[" ++ showElemsBrackets pc { inLink = True } es "" ++ "[,title=\"" ++ t ++ "\"]"
+    showElem' pc "a" [Attr "href" l, Attr "style" s] es = "link:" ++ findLink pc l ++ "[" ++ showElemsBrackets pc { inLink = True } es "" ++ "[,style=\"" ++ s ++ "\"]"
     showElem' _  "ac:emoticon" [Attr "ac:name" s] [] = confToStandardEmoticon s
-    showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []] | inCode pc = "`[`" ++ l ++ "`](" ++ findLink pc l ++ ")`"
-    showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []] = "[" ++ l ++ "](" ++ findLink pc l ++ ")"
-    showElem' pc "ac:link" [] (Tag "ri:page" [Attr "ri:content-title" l] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ ")"
-    showElem' pc "ac:link" [] (Tag "ri:space" [Attr "ri:space-key" k] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ externWikiLink pc k "" ++ ")"
-    showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" l] []] = "[" ++ l ++ "](" ++ externWikiLink pc k l ++ ")"
-    showElem' pc "ac:link" [] (Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" l] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ externWikiLink pc k l ++ ")"
+    showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []] | inCode pc = "`link:" ++ findLink pc l ++ "[`" ++ l ++ "`]`"
+    showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []] = "link:" ++ findLink pc l ++ "[" ++ l ++ "]"
+    showElem' pc "ac:link" [] (Tag "ri:page" [Attr "ri:content-title" l] []:es) =  "link:" ++ findLink pc l ++ "[" ++ showElemsBrackets pc { inLink = True } es "" ++ "]"
+    showElem' pc "ac:link" [] (Tag "ri:space" [Attr "ri:space-key" k] []:es) = "link:" ++ externWikiLink pc k "" ++ "[" ++ showElemsBrackets pc { inLink = True } es "" ++ "]"
+    showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" l] []] = "link:" ++ externWikiLink pc k l ++ "[" ++ l ++ "]"
+    showElem' pc "ac:link" [] (Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" l] []:es) = "link:" ++ externWikiLink pc k l ++ "[" ++ showElemsBrackets pc { inLink = True } es "" ++ "]"
+
     showElem' pc "ac:link" [Attr "ac:anchor" la] (Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" l] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ externWikiLink pc k l ++ "#" ++ findAnchor pc la ++ ")"
     showElem' pc "ac:link" [Attr "ac:anchor" la] (Tag "ri:page" [Attr "ri:content-title" l] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "#" ++ findAnchor pc la ++ ")"
     showElem' pc "ac:link" [Attr "ac:anchor" la] [] | inCode pc = "`[`" ++ la ++ "`](#" ++ findAnchor pc la ++ ")`"
@@ -945,4 +948,4 @@ getHeaders s = case parse confluence "" s of
 confluenceToPandoc :: String -> String -> M.Map (String, String) String -> M.Map (String, String) String -> M.Map String String -> [String] -> String -> String
 confluenceToPandoc spacekey title pm pmci am keys s = case parse confluence "" s of
   Left e   -> "Error: " ++ show e ++ "\n" ++ s
-  Right s' -> sanitize (showElems (PC spacekey title pm pmci am keys False False False False False False False False False '\n' 0) s') ++ "\n\n\n<!-- Original Confluence content:\n\n" ++ s ++ "\n\n-->\n"
+  Right s' -> sanitize (showElems (PC spacekey title pm pmci am keys False False False False False False False False False '\n' 0) s') -- ++ "\n\n\n<!-- Original Confluence content:\n\n" ++ s ++ "\n\n-->\n"
