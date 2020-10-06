@@ -80,6 +80,9 @@ confToStandardEmoticon s = case s of
   "smile" -> ":smile:" -- TODO check these three
   "light-on" -> ":light-on:"
   "yellow-star" -> ":yellow-star:"
+  "cheeky" -> ":cheeky:"
+  "sad" -> ":sad:"
+  "laugh" -> ":laugh:"
   _ -> ":" ++ (trace ("WARNING: Unkown emoticon: " ++ s) s) ++ ":"
 
 showElems :: ParseContext -> [Elem] -> String
@@ -197,8 +200,13 @@ findLink _  l@('m':'a':'i':'l':'t':'o':':':_) = uriEncode l
 findLink pc l = findLink' pc [spaceKey pc] l
 
 externWikiLink :: ParseContext -> String -> String -> String
+externWikiLink pc k l | spaceKey pc == k && pageName pc == l = ""
 externWikiLink pc space' l | space' `elem` spacekeys pc = findLink' pc [space',spaceKey pc] l
 externWikiLink _ k l = '/' : k ++ '/' : uriEncode l
+
+externWikiLink' :: ParseContext -> String -> String -> String
+externWikiLink' pc k l | spaceKey pc == k && pageName pc == l = uriEncode l
+externWikiLink' pc k l = externWikiLink pc k l
 
 findLink' :: ParseContext -> [String] -> String -> [Char]
 -- findLink' pc keys ('_':l) = findLink' pc keys ('I':l)
@@ -276,6 +284,10 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     removeSomeStyle ((Attr "class" "nolink"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "c-link"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "c-message__body"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "c-timestamp__label"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "c-link c-member_slug c-member_slug--light c-member_slug--link c-member_slug--mention"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "c-link c-message__sender_link"):as) = removeSomeStyle as
+    removeSomeStyle ((Attr "class" "c-link c-timestamp"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "v-table-cell-wrapper"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" "text"):as) = removeSomeStyle as
     removeSomeStyle ((Attr "class" ('s':'y':'n':'t':'a':'x':'h':'i':'g':'h':'l':'i':'g':'h':'t':'e':'r':' ':_)):as) = removeSomeStyle as
@@ -447,12 +459,16 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' pc "a" [Attr "href" l, Attr "title" t] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){title=\"" ++ t ++ "\"}"
     showElem' pc "a" [Attr "href" l, Attr "style" s] es = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "){style=\"" ++ s ++ "\"}"
     showElem' _  "ac:emoticon" [Attr "ac:name" s] [] = confToStandardEmoticon s
+
+   --  <ac:link ac:anchor="Multisite"><ac:plain-text-link-body><![CDATA[multisite]]></ac:plain-text-link-body><ri:page ri:space-key="DOCS57" ri:content-title="Demo" /></ac:link>
+
     showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []] | inCode pc = "`[`" ++ l ++ "`](" ++ findLink pc l ++ ")`"
     showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:content-title" l] []] = "[" ++ l ++ "](" ++ findLink pc l ++ ")"
     showElem' pc "ac:link" [] (Tag "ri:page" [Attr "ri:content-title" l] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ ")"
     showElem' pc "ac:link" [] (Tag "ri:space" [Attr "ri:space-key" k] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ externWikiLink pc k "" ++ ")"
     showElem' pc "ac:link" [] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" l] []] = "[" ++ l ++ "](" ++ externWikiLink pc k l ++ ")"
     showElem' pc "ac:link" [] (Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" l] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ externWikiLink pc k l ++ ")"
+    showElem' pc "ac:link" [Attr "ac:anchor" la] (Tag "ac:plain-text-link-body" [] lb:Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" l] []:[]) = showElemsBrackets pc { inLink = True } lb $ "(" ++ externWikiLink pc k l ++ "#" ++ findAnchor pc la ++ ")"
     showElem' pc "ac:link" [Attr "ac:anchor" la] (Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" l] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ externWikiLink pc k l ++ "#" ++ findAnchor pc la ++ ")"
     showElem' pc "ac:link" [Attr "ac:anchor" la] (Tag "ri:page" [Attr "ri:content-title" l] []:es) = showElemsBrackets pc { inLink = True } es $ "(" ++ findLink pc l ++ "#" ++ findAnchor pc la ++ ")"
     showElem' pc "ac:link" [Attr "ac:anchor" la] [] | inCode pc = "`[`" ++ la ++ "`](#" ++ findAnchor pc la ++ ")`"
@@ -463,17 +479,23 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
     showElem' _  "ac:link" [] [Tag "ri:user" _ []] = "[\\@Unknown User]{.user title=\"User linking not supported.\"}"
     showElem' pc "ac:link" _ es = showElems pc es -- empty link, ignore
     showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (replaceFileName (findLink pc p) f) ++ ")")
-    showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ externWikiLink pc k p ++ "/" ++ f ++ ")")
+    showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ externWikiLink' pc k p ++ "/" ++ f ++ ")")
     showElem' pc "ac:image" [] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline}")
-    showElem' pc "ac:image" [Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ externWikiLink pc k p ++ "/" ++ f ++ "){.inline}")
+    showElem' pc "ac:image" [Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ externWikiLink' pc k p ++ "/" ++ f ++ "){.inline}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (replaceFileName (findLink pc p) f) ++ "){.inline}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline}")
+    showElem' pc "ac:image" [Attr "ac:height" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (externWikiLink' pc k p) ++ "/" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "height=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:height" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "height=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:height" val, Attr "ac:thumbnail" "true"] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline height=" ++ val ++ "}")
-    showElem' pc "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (externWikiLink pc k p) ++ "/" ++ f ++ "){width=" ++ val ++ "}")
+    showElem' pc "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (externWikiLink' pc k p) ++ "/" ++ f ++ "){width=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (replaceFileName (findLink pc p) f) ++ "){width=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "width=" ++ val ++ "}")
-    showElem' pc "ac:image" [Attr "ac:thumbnail" "true", Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (externWikiLink pc k p) ++ "/" ++ f ++ "){.inline width=" ++ val ++ "}")
+    -- showElem' pc "ac:image" [Attr "ac:width" val, Attr "ac:queryparams" "effects=border-simple,blur-border"] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){" ++ (if (read val :: Int) > 50 then "" else ".inline ") ++ "width=" ++ val ++ "}")
+    --
+    -- "Problematic environments: <ri:page[Attr \"ri:content-title\" \"Dropped HTTP connections\",Attr \"ri:space-key\" \"DEV\"]>\n\n</ri:page>"
+    -- "Problematic environments: <ri:attachment[Attr \"ri:filename\" \"Screen Shot 2013-12-09 at 11.21.39 PM.png\"]>\n\nProblematic environments: <ri:page[Attr \"ri:content-title\" \"Dropped HTTP connections\",Attr \"ri:space-key\" \"DEV\"]>\n\n</ri:page>\n</ri:attachment>"
+
+    showElem' pc "ac:image" [Attr "ac:thumbnail" "true", Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:space-key" k, Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (externWikiLink' pc k p) ++ "/" ++ f ++ "){.inline width=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true", Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] [Tag "ri:page" [Attr "ri:content-title" p] es]] = "!" ++ (showElemsBrackets pc es $ "(" ++ (replaceFileName (findLink pc p) f) ++ "){.inline width=" ++ val ++ "}")
     showElem' pc "ac:image" [Attr "ac:thumbnail" "true", Attr "ac:width" val] [Tag "ri:attachment" [Attr "ri:filename" f] es] = "!" ++ (showElemsBrackets pc es $ "(" ++ f ++ "){.inline width=" ++ val ++ "}")
     showElem' pc "ac:inline-comment-marker" _ es = showElems pc es
@@ -521,7 +543,7 @@ showElem pc' (Tag tagname attrs elems) = showElem' pc' tagname (sort $ removeSom
       _ -> traceShow ("ERROR"::String, pageName pc, as, es) ""
     showElem' pc "ac:task-list" _ es = showElemsBlock pc es
     showElem' _  "ac:task" _ [Text _, Tag "ac:task-id" _ _, Text _, Tag "ac:task-status" _ [Text taskstatus], Text _, Tag "ac:task-body" _ [Text taskbody], Text _] = "\n\n- [" ++ (if trim taskstatus == "complete" then "x" else " ") ++ "]" ++ if not $ null $ trim taskbody then ' ':trim taskbody else "" ++ "\n"
-    showElem' pc t as es = traceShowId $ pageName pc ++ ": <" ++ t ++ show as ++ ">" ++ showElemsBlock pc es ++ "</" ++ t ++ ">"
+    showElem' pc t as es = traceId $ pageName pc ++ ": <" ++ t ++ show as ++ ">" ++ showElemsBlock pc es ++ "</" ++ t ++ ">"
 
 isli :: Elem -> Bool
 isli (Tag "li" _ _) = True
@@ -541,6 +563,7 @@ processMacroParams es = let (ps, es') = processMacroParams' es in (sort ps, es')
   where
     processMacroParams' (Tag "ac:parameter" [Attr "ac:name" _] []:es'') = processMacroParams' es''
     processMacroParams' (Tag "ac:parameter" [Attr "ac:name" n] [Text v]:es'') = let (ps, es''') = processMacroParams' es'' in (filterParams n v ps, es''')
+    processMacroParams' (Tag "ac:parameter" [Attr "ac:name" n] [Tag "ri:url" [Attr "ri:value" v] []]:es'') = let (ps, es''') = processMacroParams' es'' in (filterParams n v ps, es''')
     processMacroParams' (e:es'') = let (ps, es''') = processMacroParams' es'' in (ps, e:es''')
     processMacroParams' [] = ([], [])
     filterParams "atlassian-macro-output-type" "BLOCK" ps = ps
@@ -570,6 +593,8 @@ processMacro pc _ es | (Tag "ac:parameter" [Attr "ac:name" "hidden"] [Text "true
     isNotParam _ = True
 processMacro pc "aui-button" es = let (_, es') = processMacroParams es
                                   in  showElems pc es'
+processMacro pc "mgnl-aui-button-inline" es = let (_, es') = processMacroParams es
+                                              in  showElems pc es'
 processMacro _  "mgnl-get" [] = "[GET]{.get}"
 processMacro _  "mgnl-put" [] = "[PUT]{.put}"
 processMacro _  "mgnl-post" [] = "[POST]{.post}"
@@ -625,6 +650,17 @@ processMacro pc "artifact-resource-macro" es = let (pss, es') = processMacroPara
                                                -- in  traceId $ "[" ++ label' ++ "](" ++ showElems pc es' ++ show pss ++ ")"
                                                in  "[" ++ label' ++ "](" ++ showElems pc es' ++ show pss ++ ")"
 
+processMacro _  "widget" es = let (pss, _) = processMacroParams es
+                                  width = maybe "" (\x -> " width=\"" ++ x ++ "\"") $ lookup "width" pss
+                                  height = maybe "" (\x -> " height=\"" ++ x ++ "\"") $ lookup "height" pss
+                                  url = lookup "url" pss
+                              in  case url of
+                                    Nothing -> ""
+                                    Just url' -> "\n<iframe " ++ width ++ height ++ "allowTransparency=\"true\" frameborder=\"0\" style=\"border:none; margin:1em 0em;\" src=\"" ++ (dropScheme url') ++ "\" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>\n"
+                              where
+                                dropScheme ('h':'t':'t':'p':'s':':':s) = s
+                                dropScheme ('h':'t':'t':'p':':':s) = s
+                                dropScheme s = s
 processMacro pc "jira" es = let (pss, es') = processMacroParams es
                                 jql = maybe (("key="++) <$> lookup "key" pss) Just $ lookup "jqlQuery" pss
                             in  case jql of
@@ -667,6 +703,8 @@ processMacro pc "multiexcerpt-include" es = let (pss, es') = processMacroParams 
                                             in  pan $ "[" ++ link ++ name ++ "](!excerpt-include)"
 processMacro pc "expand" es = let (_, es') = processMacroParams es -- TODO
                               in  showElems pc es'
+processMacro pc "mgnl-expand-all" es = let (_, es') = processMacroParams es -- TODO
+                                       in  showElems pc es'
 processMacro _  "livesearch" _ = "<!-- live search used to be here -->\n" -- TODO
 processMacro _  "youtube-macro" es = let (ps, _) = processMacroParams es
                                          videoId = maybe "" id $ lookup "videoId" ps
@@ -711,6 +749,7 @@ processMacro pc "table-plus" es = let (pss, es') = processMacroParams es
                                       output (t1@(Tag "table" _ _):e2:restes) = output [t1] ++ output (e2:restes)
                                       output myes = error $ "Unhandled table-plus macro\n!!!table\n{" ++ ps ++ "}\n" ++ showElems pc myes ++ "!!!end table\n"
                                   in output es'
+processMacro pc "toc-zone" es = showElems pc es
 processMacro _  "toc" _ = "[](!toc)"
 processMacro pc "section" es = let (_, es') = processMacroParams es -- ignore parameters
                                in  showElemsBlock' pc es' "::: columns" ":::"
@@ -945,4 +984,4 @@ getHeaders s = case parse confluence "" s of
 confluenceToPandoc :: String -> String -> M.Map (String, String) String -> M.Map (String, String) String -> M.Map String String -> [String] -> String -> String
 confluenceToPandoc spacekey title pm pmci am keys s = case parse confluence "" s of
   Left e   -> "Error: " ++ show e ++ "\n" ++ s
-  Right s' -> sanitize (showElems (PC spacekey title pm pmci am keys False False False False False False False False False '\n' 0) s') ++ "\n\n\n<!-- Original Confluence content:\n\n" ++ s ++ "\n\n-->\n"
+  Right s' -> sanitize (showElems (PC spacekey title pm pmci am keys False False False False False False False False False '\n' 0) s') -- ++ "\n\n\n<!-- Original Confluence content:\n\n" ++ s ++ "\n\n-->\n"
